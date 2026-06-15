@@ -65,9 +65,11 @@ worth driving. Notes (`DRY_ROUND_*`, `OVER_BUDGET`, `EMPTY_LEDGER`) report loop 
 
 ## The certificate
 
-Each result carries a `certificate` — a short hash over the converged status and the
-admitted claims' content. Same converged ledger → same certificate (reproducible); two
-different ledgers do not collide. It is the artifact that says _whether_ you converged.
+Each result carries a `certificate` — a short hash over the converged status and each
+admitted claim's `(id, evidence, content)`, JSON-encoded so values can't collide via
+delimiters. The same converged ledger reproduces the same certificate; any difference in
+status or in an admitted claim's id/evidence/content changes it. It is the artifact that
+says _whether_ you converged.
 
 ## Scope, stated honestly
 

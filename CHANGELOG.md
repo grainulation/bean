@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.1.2 — 2026-06-15
+
+A robustness pass on `bean-check` from an independent cross-model (Codex) review that
+re-ran against 1.1.1.
+
+### Fixed
+
+- **A partial `run.json` could silently disable the evidence gate** — a `run.json` with
+  only `evidence_bar.load_bearing` clobbered the default `recommendation` tier, making it
+  `undefined` so below-bar claims passed as ready. `run.json` is now deep-merged and its
+  tiers validated (an invalid/missing tier falls back to the default).
+- **Malformed claims no longer crash the compiler** — a `null` entry or a non-array
+  `conflicts_with` raised a raw `TypeError`; such claims are now recorded as `E_SCHEMA`
+  and excluded.
+- **The certificate is JSON-encoded** over status + each admitted claim's `(id, evidence,
+content)`, so ids/values can't collide via delimiters.
+- **Dry-round tracks content, not just ids** — an in-place revision (same id, new content)
+  correctly counts as progress and increments the round.
+- **`budget-exceeded` now takes precedence over `blocked`** (CLI contract: exit 2 = stop),
+  with the blockers still reported. `--dir` with no value exits 3 instead of a stack trace.
+
+### Verified
+
+- The three 1.1.1 fixes (symmetric conflict pairing, valid-resolver discharge, content
+  certificate) were independently re-confirmed correct by the same review.
+
 ## 1.1.1 — 2026-06-15
 
 Hardens `bean-check` and its docs after a blindspot + independent cross-model review.

@@ -196,4 +196,118 @@ check("dry round with an open risk is flagged stuck", () => {
 	assert.ok(second.result.notes.some((n) => n.startsWith("DRY_ROUND_STUCK")));
 });
 
+// --- 1.1.2 regressions (found by the Codex review) ---
+check("partial run.json does not disable the other evidence bar", () => {
+	const dir = tmpFixture({
+		"claims.json": [
+			{
+				id: "c1",
+				type: "recommendation",
+				topic: "x",
+				content: "do X",
+				evidence: "web",
+			},
+		],
+		"run.json": { evidence_bar: { load_bearing: "production" } },
+	});
+	const { exit, result } = run(dir, ["--no-state"]);
+	assert.equal(result.status, "blocked");
+	assert.ok(result.blockers.some((b) => b.code === "E_WEAK_LOADBEARING"));
+	assert.equal(exit, 1);
+});
+
+check("malformed claims yield E_SCHEMA, not a crash", () => {
+	const dir = tmpFixture({
+		"claims.json": [
+			null,
+			{ id: "c1", type: "nope", topic: "x", evidence: "tested" },
+			{
+				id: "c2",
+				type: "factual",
+				topic: "x",
+				content: "ok",
+				evidence: "tested",
+				conflicts_with: 7,
+			},
+		],
+	});
+	const { exit, result } = run(dir, ["--no-state"]);
+	assert.equal(result.status, "blocked");
+	assert.ok(result.blockers.some((b) => b.code === "E_SCHEMA"));
+	assert.equal(exit, 1);
+});
+
+check("in-place revision counts as progress (not a dry round)", () => {
+	const dir = tmpFixture({
+		"claims.json": [
+			{
+				id: "c1",
+				type: "factual",
+				topic: "t",
+				content: "v1",
+				evidence: "tested",
+			},
+		],
+	});
+	run(dir);
+	fs.writeFileSync(
+		path.join(dir, ".bean", "claims.json"),
+		JSON.stringify(
+			[
+				{
+					id: "c1",
+					type: "factual",
+					topic: "t",
+					content: "v2 revised",
+					evidence: "tested",
+				},
+			],
+			null,
+			2,
+		),
+	);
+	const second = run(dir);
+	assert.equal(
+		second.result.dry,
+		false,
+		"an in-place content change must not read as dry",
+	);
+	assert.equal(second.result.round, 2);
+});
+
+check("over budget with an open blocker -> budget-exceeded (exit 2)", () => {
+	const dir = tmpFixture({
+		"claims.json": [
+			{
+				id: "c1",
+				type: "risk",
+				topic: "t",
+				content: "x",
+				evidence: "documented",
+			},
+		],
+		"run.json": { budget: { max_rounds: 1 } },
+		"state.json": {
+			round: 1,
+			seen_ids: [],
+			superseded_hashes: [],
+			claims_hash: "seed",
+		},
+	});
+	const { exit, result } = run(dir);
+	assert.equal(result.status, "budget-exceeded");
+	assert.equal(exit, 2);
+	assert.ok(
+		result.blockers.some((b) => b.code === "E_OPEN_RISK"),
+		"the blocker is still reported",
+	);
+});
+
+check("--dir with a missing value exits 3 (not a stack trace)", () => {
+	const r = spawnSync(process.execPath, [BIN, "--dir", "--json"], {
+		encoding: "utf8",
+	});
+	assert.equal(r.status, 3);
+});
+
 console.log(`\n${passed} checks passed`);

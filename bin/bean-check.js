@@ -98,7 +98,8 @@ function parseArgs(argv) {
 		const v = argv[i];
 		if (v === "--dir") {
 			a.dir = argv[++i];
-			if (a.dir === undefined) die(3, "--dir requires a path");
+			if (a.dir === undefined || a.dir.startsWith("--"))
+				die(3, "--dir requires a path");
 		} else if (v === "--json") a.json = true;
 		else if (v === "--quiet") a.quiet = true;
 		else if (v === "--no-state") a.state = false;
@@ -153,6 +154,37 @@ const DEFAULT_RUN = {
 	stakes: "medium",
 };
 
+// Merge a user run.json over the defaults — DEEP for evidence_bar (a partial bar must not
+// drop the other tier), and validate tier strings (an invalid/missing tier falls back to
+// the default rather than becoming `undefined`, which would silently disable the gate).
+/**
+ * @param {any} raw
+ * @returns {Run}
+ */
+function mergeRun(raw) {
+	const r = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+	const eb =
+		r.evidence_bar && typeof r.evidence_bar === "object" ? r.evidence_bar : {};
+	/** @param {any} t @param {Tier} dflt @returns {Tier} */
+	const tier = (t, dflt) => (TIERS.includes(t) ? t : dflt);
+	return {
+		...DEFAULT_RUN,
+		...r,
+		evidence_bar: {
+			load_bearing: tier(
+				eb.load_bearing,
+				DEFAULT_RUN.evidence_bar.load_bearing,
+			),
+			recommendation: tier(
+				eb.recommendation,
+				DEFAULT_RUN.evidence_bar.recommendation,
+			),
+		},
+		budget:
+			r.budget && typeof r.budget === "object" ? r.budget : DEFAULT_RUN.budget,
+	};
+}
+
 // ---------------------------------------------------------------- claim helpers
 
 /** @param {Claim} c */
@@ -201,11 +233,39 @@ function dominance(a, b) {
  * @returns {Result}
  */
 function compile(claims, run, prior) {
-	const byId = new Map(claims.map((c) => [c.id, c]));
-	const active = claims.filter(isActive);
 	/** @type {Finding[]} */ const blockers = [];
 	/** @type {Finding[]} */ const warnings = [];
 	/** @type {string[]} */ const notes = [];
+
+	// Partition first: only well-formed, unique-id claims participate. Malformed claims
+	// (non-objects, bad type/tier, missing id) and duplicate ids are recorded as blockers
+	// and excluded — so the checks below can't crash on a bad shape.
+	/** @type {Claim[]} */ const valid = [];
+	const seenIds = new Set();
+	for (const c of claims) {
+		const ok =
+			!!c &&
+			typeof c === "object" &&
+			!Array.isArray(c) &&
+			!!c.id &&
+			TYPES.includes(c.type) &&
+			TIERS.includes(c.evidence);
+		if (!ok)
+			blockers.push({
+				code: "E_SCHEMA",
+				claim: (c && typeof c === "object" && c.id) || "(malformed)",
+			});
+		else if (seenIds.has(c.id))
+			blockers.push({ code: "E_DUP_ID", claim: c.id });
+		else {
+			seenIds.add(c.id);
+			valid.push(c);
+		}
+	}
+	const byId = new Map(valid.map((c) => [c.id, c]));
+	const active = valid.filter(isActive);
+	if (active.length === 0)
+		notes.push("EMPTY_LEDGER: no active claims to converge");
 
 	// A claim is genuinely resolved/discharged only by a real, active, DIFFERENT claim —
 	// not by a dangling id or by pointing at itself (that would silence the gate).
@@ -222,18 +282,6 @@ function compile(claims, run, prior) {
 		hasTag(c, "residual") ||
 		hasTag(c, "accepted");
 
-	// schema sanity (a malformed or ambiguous ledger is not a converged ledger)
-	const seenIds = new Set();
-	for (const c of claims) {
-		if (!c.id || !TYPES.includes(c.type) || !TIERS.includes(c.evidence))
-			blockers.push({ code: "E_SCHEMA", claim: c.id || "(missing id)" });
-		else if (seenIds.has(c.id))
-			blockers.push({ code: "E_DUP_ID", claim: c.id });
-		else seenIds.add(c.id);
-	}
-	if (active.length === 0)
-		notes.push("EMPTY_LEDGER: no active claims to converge");
-
 	// 1. unresolved conflicts — SYMMETRIC pairing (a conflicts_with link from EITHER side
 	// registers the pair), fail-closed. A pair is cleared only when one side is inactive
 	// or carries a valid resolver. When one side strictly out-evidences the other, emit a
@@ -243,7 +291,9 @@ function compile(claims, run, prior) {
 	/** @type {Map<string, [Claim, Claim]>} */
 	const conflictPairs = new Map();
 	for (const c of active)
-		for (const other of c.conflicts_with || []) {
+		for (const other of Array.isArray(c.conflicts_with)
+			? c.conflicts_with
+			: []) {
 			const o = byId.get(other);
 			if (!o || !isActive(o) || o.id === c.id) continue;
 			if (validResolver(c) || validResolver(o)) continue;
@@ -335,8 +385,16 @@ function compile(claims, run, prior) {
 		if (supersededHashes.has(contentHash(c)))
 			warnings.push({ code: "W_REAPPEAR", claim: c.id });
 
-	const round = prior ? prior.round + (newIds.length > 0 ? 1 : 0) : 1;
-	const dry = !!prior && newIds.length === 0;
+	// "dry" means nothing CHANGED — content / evidence / status, not just ids — so an
+	// in-place revision (same id, new content) still counts as progress.
+	const claimsHash = sha(
+		active
+			.map((c) => `${c.id} ${contentHash(c)} ${c.evidence}`)
+			.sort()
+			.join(""),
+	);
+	const dry = !!prior && prior.claims_hash === claimsHash;
+	const round = prior ? prior.round + (dry ? 0 : 1) : 1;
 	const openFronts = blockers.length > 0;
 	if (dry && openFronts)
 		notes.push(
@@ -351,17 +409,19 @@ function compile(claims, run, prior) {
 			`OVER_BUDGET: round ${round} > max ${maxRounds} — deliver with open fronts named`,
 		);
 
-	// status: blocked > budget-exceeded > ready
+	// status: budget-exceeded is a "stop now, name the open fronts" terminal and takes
+	// precedence over blocked (the CLI contract: exit 2 means stop). Both keep their
+	// findings in the output regardless.
 	let /** @type {Result["status"]} */ status = "ready";
-	if (blockers.length) status = "blocked";
-	else if (overBudget) status = "budget-exceeded";
+	if (overBudget) status = "budget-exceeded";
+	else if (blockers.length) status = "blocked";
 
-	// certificate: reproducible proof of the converged set AND its status/content — not
-	// just the ids (two different ledgers must not share a certificate).
+	// certificate: reproducible proof over the converged status + each admitted claim's
+	// (id, evidence, content) — JSON-encoded so ids/values can't collide via delimiters.
 	const admitted = active
-		.map((c) => `${c.id}:${c.evidence}:${contentHash(c)}`)
-		.sort();
-	const certificate = sha(`${status}|${admitted.join(",")}`).slice(0, 16);
+		.map((c) => [c.id, c.evidence, contentHash(c)])
+		.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
+	const certificate = sha(JSON.stringify({ status, admitted })).slice(0, 16);
 
 	/** @type {State} */
 	const nextState = {
@@ -372,12 +432,12 @@ function compile(claims, run, prior) {
 		superseded_hashes: [
 			...new Set([
 				...(prior ? prior.superseded_hashes : []),
-				...claims
+				...valid
 					.filter((c) => c.status === "superseded" || c.status === "rejected")
 					.map(contentHash),
 			]),
 		],
-		claims_hash: sha(activeIds.join(",")),
+		claims_hash: claimsHash,
 	};
 
 	return {
@@ -442,10 +502,7 @@ function main() {
 	}
 	const beanDir = path.join(a.dir, ".bean");
 	const claims = loadClaims(beanDir);
-	const run = {
-		...DEFAULT_RUN,
-		...loadJson(path.join(beanDir, "run.json"), {}),
-	};
+	const run = mergeRun(loadJson(path.join(beanDir, "run.json"), {}));
 	const statePath = path.join(beanDir, "state.json");
 	const prior = a.state ? loadJson(statePath, null) : null;
 
