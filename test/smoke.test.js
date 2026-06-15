@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-check
 /**
  * bean smoke test — validates plugin manifests and skill frontmatter.
  * Zero dependencies (Node built-ins only). Exit 0 = pass, 1 = fail.
@@ -9,10 +10,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+/** @param {string} p */
 const read = (p) => fs.readFileSync(path.join(root, p), "utf8");
+/** @param {string} p */
 const json = (p) => JSON.parse(read(p));
 
 let passed = 0;
+/** @param {string} name @param {() => void} fn */
 const check = (name, fn) => {
 	fn();
 	passed++;
@@ -52,9 +56,11 @@ check("versions are synchronized across manifests", () => {
 });
 
 // --- skill frontmatter ---
+/** @param {string} md */
 const parseFrontmatter = (md) => {
 	const match = md.match(/^---\n([\s\S]*?)\n---/);
 	assert.ok(match, "SKILL.md must start with YAML frontmatter");
+	/** @type {Record<string, string>} */
 	const fm = {};
 	for (const line of match[1].split("\n")) {
 		const m = line.match(/^([a-zA-Z_]+):\s*(.*)$/);
@@ -96,6 +102,23 @@ check("the Codex agent config exists", () => {
 	assert.ok(fs.existsSync(path.join(root, "skills/bean/agents/openai.yaml")));
 });
 
+check("bean-check compiler exists and is wired as a bin", () => {
+	assert.ok(
+		fs.existsSync(path.join(root, "bin/bean-check.js")),
+		"missing bin/bean-check.js",
+	);
+	const pkg = json("package.json");
+	assert.equal(pkg.bin["bean-check"], "./bin/bean-check.js");
+});
+
+check("JSON schemas exist (claim, run, result)", () => {
+	for (const s of ["claim", "run", "result"])
+		assert.ok(
+			fs.existsSync(path.join(root, "schemas", `${s}.schema.json`)),
+			`missing schemas/${s}.schema.json`,
+		);
+});
+
 check("no redundant commands/ dir (skill provides /bean)", () => {
 	assert.ok(
 		!fs.existsSync(path.join(root, "commands")),
@@ -104,7 +127,9 @@ check("no redundant commands/ dir (skill provides /bean)", () => {
 });
 
 check("all internal markdown links resolve to real files", () => {
+	/** @type {string[]} */
 	const mdFiles = [];
+	/** @param {string} dir */
 	const walk = (dir) => {
 		for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
 			if (e.name === "node_modules" || e.name.startsWith(".")) continue;

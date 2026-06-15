@@ -99,8 +99,14 @@ Frame once, then iterate until the compiler signal goes green:
 
 ## The runtime
 
-bean runs on a claim ledger + a compiler. The **primary runtime is
-[grainulator/wheat](https://github.com/grainulation/grainulator)** (`wheat add` / `wheat compile` / `wheat resolve`); when it's absent, bean falls back to a **minimal built-in ledger** (`bean-stalk.md`) with hand-checked convergence — same loop, lighter guarantee. With grainulator connected, bean also taps the wider stack, degrading gracefully when a piece is absent:
+bean runs on a claim ledger + a compiler. It **ships its own compiler — `bean-check`** — a
+zero-dependency Node CLI built from the [Bran](https://github.com/grainulation/grainulator)
+core that scores convergence and **exits nonzero until it is reached** (conflicts,
+undischarged risks, load-bearing claims below the evidence bar, dry-round, budget). That is
+the default control plane and runs anywhere Node does. **[grainulator/wheat](https://github.com/grainulation/grainulator)**
+is an optional richer backend; where neither can run, bean falls back to a hand-checked
+`bean-stalk.md` ledger. With grainulator connected, bean also taps the wider stack,
+degrading gracefully when a piece is absent:
 
 - **[wheat](https://github.com/grainulation/grainulator)** — the ledger + compiler; record claims and gate convergence on `wheat compile`.
 - **grainulator** — dispatch autoresearch subagents for investigation rounds.
@@ -112,8 +118,8 @@ Details: [`skills/bean/references/grainulation.md`](skills/bean/references/grain
 
 ## Philosophy
 
-- **Doc-only.** Markdown and JSON. No runtime code, no dependencies, no servers, no telemetry.
-- **Runtime-backed.** grainulator/wheat is the primary runtime; a built-in ledger is the fallback — the convergence loop works either way.
+- **Lean.** Markdown, JSON, and one zero-dependency CLI (`bean-check`). No servers, no network, no telemetry, no runtime dependencies (TypeScript is a CI-only devDependency).
+- **A real gate.** `bean-check` makes convergence falsifiable — it exits nonzero until the loop honestly converges; grainulator/wheat is an optional richer backend.
 - **Verbose by default.** Show the ledger, the compiler signal, and the belief revisions — watch the answer converge.
 
 ## Contributing

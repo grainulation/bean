@@ -4,4 +4,5 @@ node_modules/
 review/
 .farmer-state.json
 bean-stalk.md
+**/.bean/state.json
 

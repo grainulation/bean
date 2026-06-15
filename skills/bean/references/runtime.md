@@ -12,9 +12,12 @@ A bean runtime provides:
 
    - `add(claim)` — record a typed claim: `factual | constraint | risk | recommendation | estimate`, at an evidence tier `stated < web < documented < tested < production`, with a topic and source.
    - `supersede(old, new)` / `resolve(conflict)` — overturn a prior claim and record why (belief revision).
-   - A claim may also carry an **`unknown` / `needs-input`** status — an explicit, valid
-     "not answerable yet" recorded instead of a fabricated answer (see
-     [verify.md](verify.md)). The compiler treats it as an open front, not a pass.
+   - Abstention is recorded as a **tag** (`needs-input` / `unknown`) on an ordinary claim —
+     an explicit, valid "not answerable yet" instead of a fabricated answer (see
+     [verify.md](verify.md)). It is a _tag, not a status_: the claim keeps a normal type
+     and tier, and the compiler treats an abstention on a load-bearing front as an open
+     front, not a pass. (Don't invent a new status value — a runtime's status set won't
+     accept it.)
    - The ledger persists across rounds and sessions. It is bean's "own notes" — the
      mechanism behind iterative self-improvement, and the reason bean prefers a long-lived
      loop over respawning fresh context per step (see [delegate.md](delegate.md)).
@@ -34,18 +37,45 @@ bean reads the compiler signal to choose its next move (step 2 of the loop) and 
 convergence (step 6). Everything else — investigation, delegation, judgment — is the
 model's.
 
-## Primary runtime: grainulator / wheat
+## Default: bean-check (bundled, zero-dependency)
 
-When grainulator/wheat is present (a `claims.json`, the `wheat` MCP server, or the
-`wheat` CLI), use it as the full runtime. It implements the interface directly. See
-[grainulation.md](grainulation.md) for the exact tools (`wheat add-claim` / `wheat add`,
-`wheat compile`, `wheat resolve`, `wheat status`) and how the loop maps onto them.
+bean ships its own compiler, `bin/bean-check.js` — a zero-dependency Node CLI built from
+the Bran-IR core. It is the **default** control plane and runs anywhere Node does (Codex,
+bare installs, CI), with no grainulator required. The agent maintains the ledger as
+`.bean/claims.json` (Bran-IR claims) plus an optional `.bean/run.json` contract (evidence
+bar, budget, mutation policy); `bean-check` scores convergence and **exits nonzero when it
+is not reached**:
 
-## Minimal built-in ledger (fallback)
+```
+node bin/bean-check.js --dir <path>     # 0 = ready, 1 = blocked, 2 = budget-exceeded
+```
 
-When grainulator is absent (e.g. on Codex or a bare Claude Code install), bean runs the
-same loop against a **hand-maintained ledger** — lighter, but the same shape. Keep a file
-`bean-stalk.md` in the working area:
+It hard-blocks on: unresolved conflicts, undischarged risks (notice→act), load-bearing
+claims below the evidence bar, and load-bearing abstentions; it also tracks the temporal
+checks a single-snapshot compiler can't — dry-round, budget, and rejected-claim
+reappearance — via a small `.bean/state.json`. On a conflict where one side strictly
+out-evidences the other it emits a belief-revision **hint** (supersede the weaker) but
+still blocks until the agent records the supersede — it never edits the ledger itself.
+
+## Richer backend: grainulator / wheat (optional)
+
+When grainulator/wheat is present (a `claims.json`, the `wheat` MCP server, or the `wheat`
+CLI), it is a richer backend — the same claim model, plus numeric confidence and more
+analysis. See [grainulation.md](grainulation.md) for the tools. Two cautions:
+
+- **Use the gate flag.** `wheat compile` exits 0 even when blocked; only
+  `wheat compile --check` (or `--gate` / `--quiet`) returns a nonzero red exit.
+- **MCP returns text, not an exit code.** Over the `wheat` MCP server, `compile` returns a
+  result whose `status` you must read — there are no `--check` exit semantics there. Parse
+  `status`; don't trust that the call merely succeeded.
+
+bean-check and wheat agree on the shared static checks (conflict detection, the converged/
+blocked baseline); bean-check adds the stricter gates and the temporal checks.
+
+## Last resort: hand-checked `bean-stalk.md`
+
+Where you genuinely cannot run the compiler (a pure-prose context, no Node), keep a
+`bean-stalk.md` table and run the checks by hand each round:
 
 ```
 | id  | type        | topic        | evidence   | status   | conflicts | claim                          |
@@ -55,8 +85,6 @@ same loop against a **hand-maintained ledger** — lighter, but the same shape. 
 | c3  | factual     | schema       | tested     | supersedes c2 | resolves c2 | user_id is NOT NULL in prod |
 ```
 
-Run the compiler checks **by hand** each round — they are simple list operations:
-
 - **Conflicts:** any two active claims on the same (topic, subject) that disagree and
   aren't linked by `supersedes`/`resolves`.
 - **Coverage gaps:** load-bearing topics with no claim, or only one claim type.
@@ -64,15 +92,11 @@ Run the compiler checks **by hand** each round — they are simple list operatio
 - **Weak evidence:** a load-bearing claim with nothing above `web`.
 - **New-this-round:** did this round add or change any claim?
 
-**Converged** when: no unresolved conflicts, every load-bearing claim is at `documented`
-or better (or the gap is explicitly flagged), and a full round added nothing new.
-
-The minimal ledger is deliberately lighter than grainulator — it has no automatic
-conflict detection or numeric confidence. Say so in verbose output when you're running on
-it, so the weaker convergence guarantee is visible.
+This hand path has the weakest guarantee — no automation, no certificate. Say so in
+verbose output when you're on it.
 
 ## Degradation, stated honestly
 
-Always name which runtime you're on. "Running on grainulator (wheat compile)" vs "running
-on the built-in ledger (hand-checked convergence)" tells the user how strong the
+Always name which control plane you're on — "bean-check (zero-dep compiler)", "wheat
+(richer backend)", or "hand-checked bean-stalk" — so the user knows how strong the
 stop-condition actually is.

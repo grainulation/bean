@@ -21,9 +21,9 @@ real signal before declaring done, and improves from its own accumulated notes. 
 
 bean runs on a **runtime**: a _claim ledger_ (typed evidence with tiers, that can be
 superseded) plus a _compiler_ that scores convergence (conflicts, coverage gaps, weak
-evidence, confidence). The compiler's output is the signal that decides what bean does
-next and when it is done. The primary runtime is **grainulator/wheat**; a **minimal
-built-in ledger** is the fallback when grainulator is absent. See
+evidence, undischarged risks) and **exits nonzero until it is reached**. bean ships its own
+zero-dependency compiler — `bean-check` — as the default, so the loop has a real gate
+anywhere Node runs; **grainulator/wheat** is an optional richer backend when present. See
 [references/runtime.md](references/runtime.md).
 
 **A note on what this is.** bean shapes the _procedure_ a model follows, not its
@@ -35,6 +35,12 @@ the model running them. Treat this as a loop discipline, not a capability transp
 If a task has one obvious correct approach and fits in a single pass, do it directly. The
 convergence loop earns its cost only when the right answer is not knowable up front —
 when you have to investigate, get it partly wrong, and correct toward it.
+
+**Match the deliverable to the request.** If you were asked only to _assess_ — review,
+audit, recommend — deliver the assessment with its residual; don't quietly turn it into
+edits. Reversible actions the task plainly implies are fine to take; destructive or
+scope-expanding ones get confirmed first (see the mutation policy in
+[references/runtime.md](references/runtime.md)).
 
 ## The loop
 

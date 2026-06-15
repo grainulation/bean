@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.1.0 — 2026-06-15
+
+Adds **bean-check** — bean's own convergence compiler — so convergence is a thing that can
+_fail_, not just a discipline you are trusted to follow.
+
+### Added
+
+- **`bin/bean-check.js`** — a zero-dependency, type-checked (`// @ts-check` + JSDoc) Node
+  CLI built from the Bran-IR core. Reads `.bean/claims.json` (+ optional `.bean/run.json`)
+  and exits nonzero until the loop converges: `0` ready, `1` blocked, `2` budget-exceeded.
+- **Hard gates** (where a single-snapshot compiler only warns): undischarged risks
+  (notice→act), load-bearing claims below the evidence bar, and load-bearing abstentions all
+  BLOCK; plus temporal checks — dry-round, budget, and rejected-claim reappearance.
+- **Conflict resolution = evidence-driven belief revision, fail-closed.** A conflict always
+  blocks; when one side strictly out-evidences the other, bean-check emits a belief-revision
+  _hint_ (supersede the weaker) but never edits the ledger — the agent records the auditable
+  supersede. No Schulze: bean has no voters, and Fable revises beliefs rather than holding
+  elections (the Bran paper itself proves Schulze is correctness-neutral).
+- **Deterministic certificate** (`sha256` over sorted admitted-claim ids), ported from Bran.
+- `schemas/` (claim / run / result), curated `test/fixtures/`, and `test/bean-check.test.js`
+  (11 behavioral checks). `tsc --noEmit` typechecks the JS via JSDoc; CI runs it.
+
+### Changed
+
+- bean-check is now the **default control plane**; grainulator/wheat is an optional richer
+  backend. Docs updated to match.
+- Abstention is a **tag** (`needs-input` / `unknown`) on a normal claim, not a status —
+  fixes a 1.0.1 doc bug where the named status would be rejected by the runtime.
+- Added an **assess-vs-mutate** boundary to the skill, and an MCP `compile` parse-`status`
+  caveat (the `--check` nonzero exit is CLI-only).
+
 ## 1.0.1 — 2026-06-15
 
 Sharpens the loop with lessons drawn from documented model behavior on agentic and

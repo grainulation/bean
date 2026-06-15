@@ -1,0 +1,34 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://github.com/grainulation/bean/schemas/run.schema.json",
+	"title": "bean run contract (.bean/run.json)",
+	"description": "Only the fields the compiler reads. Effort/verifier policy stay doc rules, not config.",
+	"type": "object",
+	"additionalProperties": true,
+	"properties": {
+		"task_id": { "type": "string" },
+		"stakes": { "enum": ["low", "medium", "high"] },
+		"evidence_bar": {
+			"type": "object",
+			"properties": {
+				"load_bearing": {
+					"enum": ["stated", "web", "documented", "tested", "production"]
+				},
+				"recommendation": {
+					"enum": ["stated", "web", "documented", "tested", "production"]
+				}
+			}
+		},
+		"budget": {
+			"type": "object",
+			"properties": { "max_rounds": { "type": "integer", "minimum": 1 } }
+		},
+		"mutation_policy": {
+			"type": "object",
+			"properties": {
+				"reversible": { "type": "string" },
+				"destructive": { "type": "string" }
+			}
+		}
+	}
+}

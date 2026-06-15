@@ -21,10 +21,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+      - name: Install dev dependencies (typecheck only)
+        run: npm install --no-audit --no-fund
       - name: Format check
         run: npx --yes prettier@3.3 --check .
-      - name: Smoke test (manifests, frontmatter, links)
-        run: node test/smoke.test.js
-      - name: Doc-only guard (no runtime dependencies)
+      - name: Typecheck (tsc --noEmit)
+        run: npm run typecheck
+      - name: Tests (smoke + bean-check)
+        run: npm test
+      - name: Zero runtime-dependency guard
         run: |
-          node -e "const p=require('./package.json'); if (p.dependencies && Object.keys(p.dependencies).length) { console.error('bean is doc-only: no runtime dependencies allowed'); process.exit(1); } console.log('ok: zero runtime dependencies');"
+          node -e "const p=require('./package.json'); if (p.dependencies && Object.keys(p.dependencies).length) { console.error('bean ships zero runtime dependencies (devDependencies only)'); process.exit(1); } console.log('ok: zero runtime dependencies');"
