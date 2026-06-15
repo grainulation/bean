@@ -1,0 +1,8 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="bean">
+  <circle cx="100" cy="100" r="96" fill="#1b1b1f"/>
+  <g transform="rotate(-18 100 100)">
+    <ellipse cx="100" cy="100" rx="46" ry="66" fill="#ff6b35"/>
+    <path d="M100 40 C 78 70, 78 130, 100 160 C 92 130, 92 70, 100 40 Z" fill="#1b1b1f" opacity="0.85"/>
+    <path d="M100 40 C 118 70, 118 130, 100 160" stroke="#1b1b1f" stroke-width="6" stroke-linecap="round" fill="none" opacity="0.5"/>
+  </g>
+</svg>
