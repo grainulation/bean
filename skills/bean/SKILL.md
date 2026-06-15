@@ -72,9 +72,11 @@ skills/connectors to gather evidence; don't do serially what you can fan out. Se
 rounds; ground claims in sources actually read, never assumption. See
 [references/verify.md](references/verify.md).
 
-**4. Compile.** Run the runtime's compiler. It returns the convergence signal: unresolved
-conflicts, coverage gaps, single-source / type-monoculture topics, weak-evidence topics,
-and a confidence read. This is a check that can fail — "it looks right" is not it.
+**4. Compile.** Run the runtime's compiler (`bean-check` by default). It returns the
+convergence signal: unresolved conflicts, coverage gaps, single-source / type-monoculture
+topics, weak-evidence / below-bar claims, and undischarged risks (with wheat, also a
+confidence read), and **exits nonzero until convergence**. This is a check that can fail —
+"it looks right" is not it. See [references/bean-check.md](references/bean-check.md).
 
 **5. Revise beliefs.** When new evidence overturns an earlier claim, _supersede_ it
 ("kill the incorrect belief") and resolve the conflict, rather than letting the

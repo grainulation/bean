@@ -24,7 +24,7 @@ bean replaces "do these N phases" with "keep going until there's nothing decisiv
 
 - **Investigate the most decisive open front** — the compiler's signal (unresolved conflict, weakest-evidence claim, coverage gap) picks the target, not a fixed plan.
 - **Record evidence in a ledger** — typed claims at honest evidence tiers (`stated` → `production`). The ledger is bean's memory across rounds — its "own notes."
-- **Compile** — a check that can fail at the whole-task level: conflicts, gaps, single-source topics, weak evidence, confidence.
+- **Compile** — a check that can fail at the whole-task level: conflicts, gaps, single-source topics, weak evidence, and undischarged risks.
 - **Revise beliefs** — when new evidence overturns an earlier claim, supersede it ("kill the incorrect belief") rather than letting the contradiction stand.
 - **Loop until converged** — stop when there are no unresolved conflicts, the evidence bar is met, and a full round adds nothing new. High-stakes work gets an independent cross-model **Codex blindspot** check before declaring done.
 - **Continuous orchestration** — every round re-surveys the available skills/connectors and spins up subagents for whatever the compiler flagged next.
@@ -87,15 +87,15 @@ before/after.
 
 Frame once, then iterate until the compiler signal goes green:
 
-| Step                  | What happens                                                                         |
-| --------------------- | ------------------------------------------------------------------------------------ |
-| **Frame** (once)      | State the goal; seed the ledger with known constraints. Does the task earn the loop? |
-| **1. Survey**         | Re-assess available skills/subagents/connectors this round; read real data.          |
-| **2. Investigate**    | Attack the most decisive open front the compiler flagged; fan out subagents.         |
-| **3. Record**         | Write findings as typed claims at honest evidence tiers into the ledger.             |
-| **4. Compile**        | Score convergence: conflicts, gaps, single-source, weak evidence, confidence.        |
-| **5. Revise beliefs** | Supersede claims that new evidence overturns; resolve conflicts.                     |
-| **6. Converged?**     | No unresolved conflicts + evidence bar met + a dry round → deliver. Else loop to 1.  |
+| Step                  | What happens                                                                          |
+| --------------------- | ------------------------------------------------------------------------------------- |
+| **Frame** (once)      | State the goal; seed the ledger with known constraints. Does the task earn the loop?  |
+| **1. Survey**         | Re-assess available skills/subagents/connectors this round; read real data.           |
+| **2. Investigate**    | Attack the most decisive open front the compiler flagged; fan out subagents.          |
+| **3. Record**         | Write findings as typed claims at honest evidence tiers into the ledger.              |
+| **4. Compile**        | Score convergence: conflicts, gaps, single-source, weak evidence, undischarged risks. |
+| **5. Revise beliefs** | Supersede claims that new evidence overturns; resolve conflicts.                      |
+| **6. Converged?**     | No unresolved conflicts + evidence bar met + a dry round → deliver. Else loop to 1.   |
 
 ## The runtime
 

@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.1.1 — 2026-06-15
+
+Hardens `bean-check` and its docs after a blindspot + independent cross-model review.
+
+### Fixed
+
+- **Conflict detection was unsound** — a one-directional `conflicts_with` link from the
+  higher-lexical-id side was silently dropped (the gate exited "ready" on a real conflict).
+  Pairing is now symmetric: a link from either side registers the conflict.
+- **A risk or conflict could discharge itself** — a `resolved_by` pointing at a dangling or
+  self id cleared the gate. It now discharges only when it references a real, active,
+  _different_ claim.
+- **The certificate now covers status + claim content**, not just the id set, so two
+  different ledgers no longer collide on one certificate.
+- `--dir` with no value exits cleanly (3) instead of a raw stack trace; duplicate ids raise
+  `E_DUP_ID`; empty / over-budget ledgers are noted.
+
+### Added / Changed
+
+- New **`references/bean-check.md`** — the operating guide for the default compiler: the
+  `.bean/` file layout, the claim shape, a worked example, and the blocker-code → next-move
+  table. Linked from SKILL.md and runtime.md.
+- Regression fixtures + tests for the asymmetric-conflict and self-discharge cases.
+- Docs: scrubbed "confidence" (a wheat-only signal) from the default-compiler descriptions;
+  reframed grainulator as the optional richer backend; documented that bean-check detects
+  only `conflicts_with`-linked conflicts.
+
 ## 1.1.0 — 2026-06-15
 
 Adds **bean-check** — bean's own convergence compiler — so convergence is a thing that can

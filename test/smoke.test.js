@@ -91,6 +91,7 @@ check("all referenced reference files exist", () => {
 		"runtime-claude",
 		"runtime-codex",
 		"grainulation",
+		"bean-check",
 	];
 	for (const r of refs) {
 		const p = path.join(root, "skills/bean/references", `${r}.md`);

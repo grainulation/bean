@@ -96,8 +96,10 @@ function parseArgs(argv) {
 	};
 	for (let i = 0; i < argv.length; i++) {
 		const v = argv[i];
-		if (v === "--dir") a.dir = argv[++i];
-		else if (v === "--json") a.json = true;
+		if (v === "--dir") {
+			a.dir = argv[++i];
+			if (a.dir === undefined) die(3, "--dir requires a path");
+		} else if (v === "--json") a.json = true;
 		else if (v === "--quiet") a.quiet = true;
 		else if (v === "--no-state") a.state = false;
 		else if (v === "--help" || v === "-h") a.help = true;
@@ -165,14 +167,6 @@ const isLoadBearing = (c) =>
 	hasTag(c, "load-bearing") || c.type === "recommendation";
 /** @param {Claim} c */
 const isAbstention = (c) => hasTag(c, "needs-input") || hasTag(c, "unknown");
-// A risk is discharged once it is closed, linked to a resolution, or explicitly
-// dispositioned. An active, undischarged risk is an OPEN FRONT (notice->act).
-/** @param {Claim} c */
-const riskDischarged = (c) =>
-	!!c.resolved_by ||
-	hasTag(c, "confirmed-non-issue") ||
-	hasTag(c, "residual") ||
-	hasTag(c, "accepted");
 /** @param {Claim} c */
 const contentHash = (c) =>
 	sha(
@@ -213,49 +207,76 @@ function compile(claims, run, prior) {
 	/** @type {Finding[]} */ const warnings = [];
 	/** @type {string[]} */ const notes = [];
 
-	// schema sanity (a malformed ledger is not a converged ledger)
-	for (const c of claims)
+	// A claim is genuinely resolved/discharged only by a real, active, DIFFERENT claim —
+	// not by a dangling id or by pointing at itself (that would silence the gate).
+	/** @param {Claim} c */
+	const validResolver = (c) => {
+		if (!c.resolved_by || c.resolved_by === c.id) return false;
+		const r = byId.get(c.resolved_by);
+		return !!r && isActive(r);
+	};
+	/** @param {Claim} c */
+	const discharged = (c) =>
+		validResolver(c) ||
+		hasTag(c, "confirmed-non-issue") ||
+		hasTag(c, "residual") ||
+		hasTag(c, "accepted");
+
+	// schema sanity (a malformed or ambiguous ledger is not a converged ledger)
+	const seenIds = new Set();
+	for (const c of claims) {
 		if (!c.id || !TYPES.includes(c.type) || !TIERS.includes(c.evidence))
 			blockers.push({ code: "E_SCHEMA", claim: c.id || "(missing id)" });
+		else if (seenIds.has(c.id))
+			blockers.push({ code: "E_DUP_ID", claim: c.id });
+		else seenIds.add(c.id);
+	}
+	if (active.length === 0)
+		notes.push("EMPTY_LEDGER: no active claims to converge");
 
-	// 1. unresolved conflicts — block either way (fail-closed). When one side strictly
-	// out-evidences the other, emit a belief-revision HINT (supersede the weaker) — but
-	// still block until the ledger records it. bean-check never mutates the ledger: the
-	// agent performs the auditable supersede (the Fable belief-revision act). Equal-tier
-	// or abstention-tainted conflicts are genuine ties — resolve via the loop. No Schulze:
-	// bean has no competing voters, and Fable revises beliefs rather than holding elections.
+	// 1. unresolved conflicts — SYMMETRIC pairing (a conflicts_with link from EITHER side
+	// registers the pair), fail-closed. A pair is cleared only when one side is inactive
+	// or carries a valid resolver. When one side strictly out-evidences the other, emit a
+	// belief-revision HINT (supersede the weaker) — but still block until the agent records
+	// it. bean-check never edits the ledger. No Schulze: bean has no voters, and Fable
+	// revises beliefs rather than holding elections.
+	/** @type {Map<string, [Claim, Claim]>} */
+	const conflictPairs = new Map();
 	for (const c of active)
 		for (const other of c.conflicts_with || []) {
 			const o = byId.get(other);
-			if (!o || !isActive(o)) continue; // superseding/resolution clears it
-			if (c.resolved_by || o.resolved_by) continue;
-			if (c.id >= o.id) continue; // emit each pair once
-			const dom = dominance(c, o);
-			blockers.push(
-				dom
-					? {
-							code: "E_CONFLICT",
-							claim: c.id,
-							with: o.id,
-							topic: c.topic,
-							resolvable: true,
-							supersede: dom.loser,
-							keep: dom.winner,
-							reason: dom.reason,
-						}
-					: {
-							code: "E_CONFLICT",
-							claim: c.id,
-							with: o.id,
-							topic: c.topic,
-							resolvable: false,
-						},
-			);
+			if (!o || !isActive(o) || o.id === c.id) continue;
+			if (validResolver(c) || validResolver(o)) continue;
+			const [a, b] = c.id < o.id ? [c, o] : [o, c];
+			conflictPairs.set(`${a.id} ${b.id}`, [a, b]);
 		}
+	for (const [a, b] of conflictPairs.values()) {
+		const dom = dominance(a, b);
+		blockers.push(
+			dom
+				? {
+						code: "E_CONFLICT",
+						claim: a.id,
+						with: b.id,
+						topic: a.topic,
+						resolvable: true,
+						supersede: dom.loser,
+						keep: dom.winner,
+						reason: dom.reason,
+					}
+				: {
+						code: "E_CONFLICT",
+						claim: a.id,
+						with: b.id,
+						topic: a.topic,
+						resolvable: false,
+					},
+		);
+	}
 
 	// 2. undischarged risk — recording a concern is not resolving it
 	for (const c of active)
-		if (c.type === "risk" && !riskDischarged(c))
+		if (c.type === "risk" && !discharged(c))
 			blockers.push({ code: "E_OPEN_RISK", claim: c.id, topic: c.topic });
 
 	// 3. load-bearing claim below the evidence bar (bean GATES; wheat only warns)
@@ -325,12 +346,23 @@ function compile(claims, run, prior) {
 
 	const maxRounds = run.budget && run.budget.max_rounds;
 	const overBudget = maxRounds != null && round > maxRounds;
+	if (overBudget)
+		notes.push(
+			`OVER_BUDGET: round ${round} > max ${maxRounds} — deliver with open fronts named`,
+		);
 
+	// status: blocked > budget-exceeded > ready
 	let /** @type {Result["status"]} */ status = "ready";
 	if (blockers.length) status = "blocked";
 	else if (overBudget) status = "budget-exceeded";
 
-	const certificate = sha(activeIds.join(",")).slice(0, 16);
+	// certificate: reproducible proof of the converged set AND its status/content — not
+	// just the ids (two different ledgers must not share a certificate).
+	const admitted = active
+		.map((c) => `${c.id}:${c.evidence}:${contentHash(c)}`)
+		.sort();
+	const certificate = sha(`${status}|${admitted.join(",")}`).slice(0, 16);
+
 	/** @type {State} */
 	const nextState = {
 		round,

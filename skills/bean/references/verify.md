@@ -75,8 +75,8 @@ success criteria clarified with the human instead of spinning on an untestable g
 ## Per round: the compiler signal IS the failable check
 
 `compile` is the whole-task check that can fail: it returns unresolved conflicts, coverage
-gaps, single-source topics, weak-evidence topics, and confidence. The loop is not done
-while that signal is red. See [runtime.md](runtime.md) for what the signal contains and
+gaps, single-source topics, weak-evidence / below-bar claims, and undischarged risks. The
+loop is not done while that signal is red. See [runtime.md](runtime.md) for what the signal contains and
 [convergence.md](convergence.md) for next-move, the never-stop-at-caveats rule, and stop.
 
 ## What counts as real evidence (by domain)

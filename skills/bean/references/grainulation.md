@@ -1,9 +1,11 @@
-# Reference: the grainulator runtime (primary impl)
+# Reference: the grainulator runtime (optional richer backend)
 
-grainulator/wheat is bean's **primary runtime** — the full implementation of the
-ledger + compiler interface from [runtime.md](runtime.md). When it's present, bean's loop
-maps directly onto its tools. This is not an optional power-up; it's the engine bean was
-designed to run on.
+grainulator/wheat is an **optional richer backend**. bean's default control plane is its
+own zero-dependency compiler, `bean-check` (see [runtime.md](runtime.md)); when
+grainulator/wheat is present, bean's loop can map onto its tools instead — the same claim
+model, plus a numeric confidence, richer analysis, and the wider stack (deepwiki / silo /
+farmer / mill). The warning codes below (`W_ECHO_CHAMBER`, `W_TYPE_MONOCULTURE`,
+`W_WEAK_EVIDENCE`) are wheat's; bean-check emits its own (`W_SINGLE_SOURCE`, `W_MONOCULTURE`).
 
 Detect it: a `claims.json` in scope, the `wheat` MCP server connected, or the `wheat` CLI
 available.
@@ -43,6 +45,6 @@ passes, compile, emit. bean is the **adaptive controller** that loops those prim
 the compile signal — choosing the next front, revising beliefs, and running until
 convergence. grainulator is the substrate; bean is the loop that runs on it.
 
-When grainulator is absent, fall back to the minimal built-in ledger in
-[runtime.md](runtime.md) and say so — the loop is identical, the convergence guarantee is
-weaker.
+When grainulator is absent, bean runs on its bundled `bean-check` compiler (the default);
+only where neither can run do you hand-check via `bean-stalk.md`. Always say which control
+plane you're on — see [runtime.md](runtime.md).

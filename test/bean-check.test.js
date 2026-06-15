@@ -65,6 +65,10 @@ const cases = [
 		code: "E_WEAK_LOADBEARING",
 	},
 	{ f: "open-unknown", status: "blocked", exit: 1, code: "E_OPEN_UNKNOWN" },
+	// regression: one-directional conflicts_with from the higher-lexical-id side (was dropped)
+	{ f: "asymmetric-conflict", status: "blocked", exit: 1, code: "E_CONFLICT" },
+	// regression: a risk cannot discharge itself (self id) or via a dangling resolved_by
+	{ f: "self-discharge", status: "blocked", exit: 1, code: "E_OPEN_RISK" },
 ];
 for (const c of cases)
 	check(`${c.f} -> ${c.status} (exit ${c.exit})`, () => {
@@ -89,6 +93,16 @@ check("certificate is deterministic for the same claim set", () => {
 		"--no-state",
 	]);
 	assert.equal(a.result.certificate, b.result.certificate);
+});
+
+check("certificate distinguishes different ledgers", () => {
+	const a = run(path.join(root, "test", "fixtures", "converged"), [
+		"--no-state",
+	]);
+	const b = run(path.join(root, "test", "fixtures", "open-risk"), [
+		"--no-state",
+	]);
+	assert.notEqual(a.result.certificate, b.result.certificate);
 });
 
 // --- conflict resolution: strict-dominance hint vs genuine tie (fail-closed both ways) ---

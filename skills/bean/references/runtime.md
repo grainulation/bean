@@ -27,8 +27,10 @@ A bean runtime provides:
    - unresolved **conflicts** between claims,
    - **coverage gaps** (topics with no claims, or only one claim type),
    - **single-source / echo-chamber** topics,
-   - **weak-evidence** topics (nothing above `web`),
-   - a **confidence** read.
+   - **weak-evidence** topics, and load-bearing claims below the evidence bar,
+   - **undischarged risks** and temporal checks (dry-round, budget).
+
+   (`bean-check` produces the above; wheat additionally returns a numeric **confidence**.)
 
    The compiler is the failable check at the whole-task level. bean does not decide it is
    done; the compiler's signal does.
@@ -56,6 +58,13 @@ checks a single-snapshot compiler can't — dry-round, budget, and rejected-clai
 reappearance — via a small `.bean/state.json`. On a conflict where one side strictly
 out-evidences the other it emits a belief-revision **hint** (supersede the weaker) but
 still blocks until the agent records the supersede — it never edits the ledger itself.
+
+It detects conflicts via explicit **`conflicts_with`** links (it does not infer semantic
+contradiction) — so when you notice two claims disagree, _record the link_; bean-check then
+blocks until one side is superseded or carries a valid `resolved_by`. A `resolved_by` only
+discharges a risk or clears a conflict when it points at a real, active, _different_ claim
+(a dangling or self-reference does not). See [bean-check.md](bean-check.md) for the file
+format and the blocker-code → next-move table.
 
 ## Richer backend: grainulator / wheat (optional)
 
