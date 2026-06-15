@@ -12,8 +12,12 @@ A bean runtime provides:
 
    - `add(claim)` — record a typed claim: `factual | constraint | risk | recommendation | estimate`, at an evidence tier `stated < web < documented < tested < production`, with a topic and source.
    - `supersede(old, new)` / `resolve(conflict)` — overturn a prior claim and record why (belief revision).
+   - A claim may also carry an **`unknown` / `needs-input`** status — an explicit, valid
+     "not answerable yet" recorded instead of a fabricated answer (see
+     [verify.md](verify.md)). The compiler treats it as an open front, not a pass.
    - The ledger persists across rounds and sessions. It is bean's "own notes" — the
-     mechanism behind iterative self-improvement.
+     mechanism behind iterative self-improvement, and the reason bean prefers a long-lived
+     loop over respawning fresh context per step (see [delegate.md](delegate.md)).
 
 2. **A compiler** — scores the ledger and returns a **convergence signal**:
 

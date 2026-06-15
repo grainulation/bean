@@ -22,6 +22,14 @@ When the loop converges, deliver the answer plus:
 ## Last-pass questions
 
 - Which load-bearing claim is at the lowest evidence tier, and why couldn't I lift it?
+- **Did I notice anything I then proceeded past?** Re-scan the round for a concern, defect,
+  or contradicting signal I surfaced — in the ledger or just in reasoning — that never got
+  discharged. A noticed-but-undischarged issue is the dominant failure mode: it must be a
+  confirmed non-issue, a verified fix, or a named true residual before delivery, never a
+  thing I logged and rolled past (see [convergence.md](convergence.md)).
+- **Did I fabricate where I should have abstained?** Any confident claim resting on context
+  I didn't actually have should be an honest `unknown` / `needs-input` instead (see
+  [verify.md](verify.md)).
 - **Did I stop at a caveat I could have driven to closed?** Re-read every "but X is
   unverified" — is it a confirmed non-issue, a fix, or a genuine true blocker? If it's none
   of those, keep going (see [convergence.md](convergence.md)).

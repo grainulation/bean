@@ -1,6 +1,6 @@
 {
 	"name": "bean",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "A documentation-only Codex plugin adding one explicit /bean skill: run a task as a recursive convergence loop — investigate, record evidence in a ledger, compile, revise beliefs, and loop until converged.",
 	"author": {
 		"name": "Grainulation"

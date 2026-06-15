@@ -1,6 +1,6 @@
 {
 	"name": "@grainulation/bean",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "A recursive convergence loop for Claude Code and Codex: investigate, record evidence in a claim ledger, compile, revise beliefs, and loop until converged. Runs on grainulator/wheat or a built-in ledger. Verbose by default.",
 	"type": "module",
 	"private": false,

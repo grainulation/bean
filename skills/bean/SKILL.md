@@ -77,8 +77,10 @@ contradiction stand. The loop goes forward and backward. See
 
 **6. Converged?** Don't stop at "looks done, but…". Drive every open front to one of three
 terminal states — confirmed non-issue, fixed-and-verified, or a true residual you genuinely
-can't reach from here. A caveat that's none of those is a place you stopped early; keep
-looking where a one-shot answer would quit. Converged = no unresolved conflicts + evidence
+can't reach from here. This includes every concern you _noticed_: a risk or contradiction
+you logged is an open front, and recording it is not resolving it — proceeding past a
+logged-but-undischarged concern is the dominant failure mode. A caveat that's none of those
+three is a place you stopped early; keep looking where a one-shot answer would quit. Converged = no unresolved conflicts + evidence
 bar met for every load-bearing claim + a full round drove no front to a new state.
 Otherwise go back to step 1 on the next-most-decisive front. On high-stakes work, run an
 independent adversarial / cross-model check before declaring done. See

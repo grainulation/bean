@@ -49,6 +49,10 @@ and require a terminal marker (e.g. `REVIEW_DONE:<slug>`) so completion is detec
 
 - Do not ask multiple Codex sessions to write the same file.
 - Do not ask Codex to patch production source during a read-only review.
+- Point the reviewer at the **final artifact**, not at bean's reasoning narration. A clean
+  trace and a correct deliverable are different things; judging the process invites a
+  polished story over a working result. Give it the diff/file/output and ask what's wrong
+  with _that_.
 - If the Codex CLI is unavailable, fall back to an independent in-runtime subagent with a
   fresh context (see [delegate.md](delegate.md)) and say the cross-model lane was
   unavailable — don't silently skip it.

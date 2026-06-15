@@ -20,6 +20,17 @@ rather than investigating everything yourself in series.
 - The front isn't well-defined yet — sharpen the question (what claim would resolve it?)
   before fanning out.
 
+## Persistent context beats respawn
+
+The ledger is the durable memory (see [runtime.md](runtime.md)), so the default shape is a
+**long-lived loop** that accumulates claims — not a blocking orchestrator that spawns a
+fresh agent per step and pays to re-hydrate the same context every time. Re-establishing
+context per subtask is pure overhead; prefer a worker that keeps its context and reads/
+writes the shared ledger. Reserve fan-out for genuinely independent investigations (the
+hard tail, multiple sources, independent verification) — there the parallelism pays for the
+briefing cost. When the runtime supports it, prefer async, non-blocking workers over an
+orchestrator that stalls waiting on each one.
+
 ## The briefing contract
 
 Every delegated agent gets, explicitly:
@@ -30,6 +41,11 @@ Every delegated agent gets, explicitly:
 3. **Save location** — where to write any artifacts.
 4. **Context** — only the relevant prior claims, not the whole transcript.
 5. **Boundaries** — out of scope; read-only vs. a narrow write scope.
+
+Brief the agent on the **real task**, not on the fact that it's being checked. "Find the
+cause of this failure" produces honest investigation; "show that this is correct" invites a
+worker to optimize for looking right over being right. Frame the job as the work itself, and
+have it return raw findings you grade — not a verdict it grades itself on.
 
 ## Independence for verification
 

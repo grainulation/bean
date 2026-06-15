@@ -21,6 +21,15 @@ changes the outcome. Read it off the compiler signal, roughly in this priority:
 If several are tied, prefer the one that could most cheaply prove you _wrong_. The fastest
 path to a right answer is killing wrong beliefs early.
 
+### Effort is a budget to allocate, not a dial to turn up
+
+Spend the expensive moves — high reasoning effort, parallel fan-out, the cross-model
+blindspot lane — on the **one or two most decisive, hardest open fronts**, not uniformly.
+Past a point, more effort and more agents on an _easy_ front buy almost nothing: the
+score-vs-cost curve flattens while cost keeps climbing, and naive multi-agent fan-out on a
+front that didn't need it is often slower than a single focused pass. Read the decisive
+front off the signal, pour effort there, and single-pass the rest.
+
 ## The self-correction progression
 
 A useful shape for each investigation — **fail → investigate → verify → distill →
@@ -48,6 +57,27 @@ A caveat that is none of these three is just a place you stopped early. "Here ar
 things to watch" is a cop-out; "here is the one thing I genuinely cannot verify, and the
 exact check that would close it" is the honest end state. Keep looking where a one-shot
 answer would quit — that persistence is most of bean's value.
+
+### The notice→act gap is the dominant failure — close it with a gate
+
+The most common way a careful loop still ships a wrong answer is **not** failing to
+notice. It's noticing — surfacing the relevant concern, even writing it down — and then
+proceeding as if it were resolved. The concern gets logged and the output rolls past it.
+
+So make discharge a hard gate, not a hope:
+
+- **Record at find-time, not report-time.** The moment you notice a concern, a defect, or
+  a contradicting signal, write it into the ledger as a claim (a `risk`, or a conflict).
+  Don't hold it in your head to "mention later" — held concerns are the ones that get
+  dropped. A found-but-unrecorded finding is the same failure as never finding it.
+- **Every recorded concern must be discharged or it blocks convergence.** A claim that
+  raises a risk or a conflict is an open front by definition. It reaches a terminal state
+  the same three ways as any front — confirmed non-issue, fixed-and-verified, or named
+  true residual — and until it does, the loop is **not** converged, no matter how good the
+  rest looks. The compiler treats an open conflict as red; treat an undischarged concern
+  the same way even when you logged it yourself.
+- **Recording is not resolving.** Writing "this might be wrong" is the start of the work,
+  not the end of it. Don't let the act of documenting a concern stand in for acting on it.
 
 ### …but persistence is not over-engineering
 
