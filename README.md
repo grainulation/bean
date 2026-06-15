@@ -31,8 +31,6 @@ bean replaces "do these N phases" with "keep going until there's nothing decisiv
 - **Continuous orchestration** — every round re-surveys the available skills/connectors and spins up subagents for whatever the compiler flagged next.
 - **Verbose by default** — each round surfaces the ledger, the compiler signal, the next move, and any belief it revised, so you can watch the answer converge.
 
-> bean is **modeled on how the Fable model actually worked** — adaptive, belief-revising self-correction, not a fixed checklist. It keeps the [fable-mode](https://github.com/mrtooher/fable-mode) caveat: a skill shapes the _procedure_ a model follows, not its capability ceiling.
-
 ## Install
 
 **Step 1** — Add the marketplace (one-time):
