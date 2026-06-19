@@ -16,6 +16,22 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BIN = path.join(root, "bin", "bean-check.js");
+const VERIFY_BIN = path.join(root, "bin", "bean-verify.js");
+
+// portable oracle commands (exit 0 = pass, 1 = fail) — no reliance on /bin/true
+const PASS_CMD = [process.execPath, "-e", "process.exit(0)"];
+const FAIL_CMD = [process.execPath, "-e", "process.exit(1)"];
+
+/** @param {string} dir @param {string} claim @param {string} verifier @returns {number} */
+const verify = (dir, claim, verifier) => {
+	const r = spawnSync(
+		process.execPath,
+		[VERIFY_BIN, "--dir", dir, "--claim", claim, "--verifier", verifier],
+		{ encoding: "utf8" },
+	);
+	if (r.error) throw r.error;
+	return r.status ?? -1;
+};
 
 let passed = 0;
 /** @param {string} name @param {() => void} fn */
@@ -366,5 +382,310 @@ check("self depends_on is stale (E_STALE_DEPENDENT)", () => {
 	assert.ok(result.blockers.some((b) => b.code === "E_STALE_DEPENDENT"));
 	assert.equal(exit, 1);
 });
+
+// --- 2.0: the oracle gate (modes, verdicts, freshness, converged-with-residuals) ---
+
+/** @param {string} id @param {Record<string, unknown>} [extra] @returns {Record<string, unknown>} */
+const lbClaim = (id, extra = {}) => ({
+	id,
+	type: "factual",
+	topic: "t",
+	content: `claim ${id}`,
+	evidence: "tested",
+	tags: ["load-bearing"],
+	...extra,
+});
+
+check("compat (default) ignores the oracle gate -> ready", () => {
+	const dir = tmpFixture({
+		"claims.json": [lbClaim("c1")], // load-bearing, no verifier
+	});
+	const { exit, result } = run(dir, ["--no-state"]);
+	assert.equal(result.status, "ready");
+	assert.equal(exit, 0);
+	assert.equal(result.verification.mode, "compat");
+});
+
+check(
+	"strict: load-bearing claim with no verifier/residual -> E_UNVERIFIED_LOADBEARING",
+	() => {
+		const dir = tmpFixture({
+			"claims.json": [lbClaim("c1")],
+			"run.json": { verification: { mode: "strict" } },
+		});
+		const { exit, result } = run(dir, ["--no-state"]);
+		assert.equal(result.status, "blocked");
+		assert.equal(exit, 1);
+		assert.ok(
+			result.blockers.some((b) => b.code === "E_UNVERIFIED_LOADBEARING"),
+		);
+	},
+);
+
+check("strict: verified_by an undeclared oracle -> E_ORACLE_UNDECLARED", () => {
+	const dir = tmpFixture({
+		"claims.json": [lbClaim("c1", { verified_by: { verifier: "ghost" } })],
+		"run.json": { verification: { mode: "strict" }, oracles: {} },
+	});
+	const { result } = run(dir, ["--no-state"]);
+	assert.ok(result.blockers.some((b) => b.code === "E_ORACLE_UNDECLARED"));
+});
+
+check(
+	"strict: declared verifier but no recorded verdict -> E_VERIFY_ERROR",
+	() => {
+		const dir = tmpFixture({
+			"claims.json": [lbClaim("c1", { verified_by: { verifier: "unit" } })],
+			"run.json": {
+				verification: { mode: "strict" },
+				oracles: { unit: { cmd: PASS_CMD } },
+			},
+		});
+		const { result } = run(dir, ["--no-state"]);
+		assert.ok(result.blockers.some((b) => b.code === "E_VERIFY_ERROR"));
+	},
+);
+
+check("strict: a recorded PASS verdict converges -> ready (exit 0)", () => {
+	const dir = tmpFixture({
+		"claims.json": [lbClaim("c1", { verified_by: { verifier: "unit" } })],
+		"run.json": {
+			verification: { mode: "strict" },
+			oracles: { unit: { cmd: PASS_CMD } },
+		},
+	});
+	assert.equal(verify(dir, "c1", "unit"), 0); // bean-verify records a pass
+	const { exit, result } = run(dir, ["--no-state"]);
+	assert.equal(result.status, "ready");
+	assert.equal(exit, 0);
+	assert.equal(result.verification.verified, 1);
+});
+
+check(
+	"strict: a load-bearing residual -> converged-with-residuals (exit 4)",
+	() => {
+		const dir = tmpFixture({
+			"claims.json": [
+				{
+					id: "c1",
+					type: "recommendation",
+					topic: "plan",
+					content: "adopt X — judgment call, no automated oracle exists",
+					evidence: "documented",
+					tags: ["residual"],
+				},
+			],
+			"run.json": { verification: { mode: "strict" } },
+		});
+		const { exit, result } = run(dir, ["--no-state"]);
+		assert.equal(result.status, "converged-with-residuals");
+		assert.equal(exit, 4);
+		assert.equal(result.verification.residual, 1);
+	},
+);
+
+check("strict: a recorded FAIL verdict -> E_ORACLE_FAILED (exit 1)", () => {
+	const dir = tmpFixture({
+		"claims.json": [lbClaim("c1", { verified_by: { verifier: "unit" } })],
+		"run.json": {
+			verification: { mode: "strict" },
+			oracles: { unit: { cmd: FAIL_CMD } },
+		},
+	});
+	assert.equal(verify(dir, "c1", "unit"), 1); // bean-verify records a fail
+	const { exit, result } = run(dir, ["--no-state"]);
+	assert.equal(result.status, "blocked");
+	assert.equal(exit, 1);
+	assert.ok(result.blockers.some((b) => b.code === "E_ORACLE_FAILED"));
+});
+
+check(
+	"strict: editing a claim after a pass makes the verdict stale -> E_ORACLE_STALE",
+	() => {
+		const dir = tmpFixture({
+			"claims.json": [lbClaim("c1", { verified_by: { verifier: "unit" } })],
+			"run.json": {
+				verification: { mode: "strict" },
+				oracles: { unit: { cmd: PASS_CMD } },
+			},
+		});
+		verify(dir, "c1", "unit"); // pass recorded against current content
+		// revise the claim content after verification -> claim_binding no longer matches
+		fs.writeFileSync(
+			path.join(dir, ".bean", "claims.json"),
+			JSON.stringify([
+				lbClaim("c1", {
+					content: "claim c1 REVISED after the verdict",
+					verified_by: { verifier: "unit" },
+				}),
+			]),
+		);
+		const { result } = run(dir, ["--no-state"]);
+		assert.ok(result.blockers.some((b) => b.code === "E_ORACLE_STALE"));
+	},
+);
+
+check("advisory: a missing verifier warns but does not block", () => {
+	const dir = tmpFixture({
+		"claims.json": [lbClaim("c1")],
+		"run.json": { verification: { mode: "advisory" } },
+	});
+	const { exit, result } = run(dir, ["--no-state"]);
+	assert.equal(result.status, "ready");
+	assert.equal(exit, 0);
+	assert.ok(result.warnings.some((w) => w.code === "W_UNVERIFIED_LOADBEARING"));
+});
+
+// H6: advisory must PRESERVE the specific failure, not flatten it to a generic warning
+check(
+	"advisory: a FAILED verdict warns as W_ORACLE_FAILED (detail preserved)",
+	() => {
+		const dir = tmpFixture({
+			"claims.json": [lbClaim("c1", { verified_by: { verifier: "unit" } })],
+			"run.json": {
+				verification: { mode: "advisory" },
+				oracles: { unit: { cmd: FAIL_CMD } },
+			},
+		});
+		verify(dir, "c1", "unit");
+		const { exit, result } = run(dir, ["--no-state"]);
+		assert.equal(result.status, "ready");
+		assert.equal(exit, 0);
+		assert.ok(result.warnings.some((w) => w.code === "W_ORACLE_FAILED"));
+	},
+);
+
+// H1: changing the oracle command after a PASS makes the verdict stale
+check("strict: changing the oracle cmd after a pass -> E_ORACLE_STALE", () => {
+	const dir = tmpFixture({
+		"claims.json": [lbClaim("c1", { verified_by: { verifier: "unit" } })],
+		"run.json": {
+			verification: { mode: "strict" },
+			oracles: { unit: { cmd: PASS_CMD } },
+		},
+	});
+	verify(dir, "c1", "unit");
+	fs.writeFileSync(
+		path.join(dir, ".bean", "run.json"),
+		JSON.stringify({
+			verification: { mode: "strict" },
+			oracles: { unit: { cmd: [process.execPath, "-e", "0"] } },
+		}),
+	);
+	const { result } = run(dir, ["--no-state"]);
+	assert.ok(result.blockers.some((b) => b.code === "E_ORACLE_STALE"));
+});
+
+// H2: a verifier name resolving via Object.prototype (e.g. "toString") is NOT a bypass
+check(
+	"strict: prototype-name verifier (toString) is undeclared, not a bypass",
+	() => {
+		const dir = tmpFixture({
+			"claims.json": [lbClaim("c1", { verified_by: { verifier: "toString" } })],
+			"run.json": { verification: { mode: "strict" }, oracles: {} },
+		});
+		const { result } = run(dir, ["--no-state"]);
+		assert.ok(result.blockers.some((b) => b.code === "E_ORACLE_UNDECLARED"));
+	},
+);
+
+// H3: a verdict file whose name is not the canonical <claim>.<verifier>.json is ignored
+check("strict: a non-canonical verdict filename is not admitted", () => {
+	const dir = tmpFixture({
+		"claims.json": [lbClaim("c1", { verified_by: { verifier: "unit" } })],
+		"run.json": {
+			verification: { mode: "strict" },
+			oracles: { unit: { cmd: PASS_CMD } },
+		},
+	});
+	const vdir = path.join(dir, ".bean", "verdicts");
+	fs.mkdirSync(vdir, { recursive: true });
+	fs.writeFileSync(
+		path.join(vdir, "sneaky.json"),
+		JSON.stringify({
+			claim: "c1",
+			verifier: "unit",
+			verdict: "pass",
+			oracle_digest: "x",
+			inputs_hash: "x",
+			claim_binding: "x",
+		}),
+	);
+	const { result } = run(dir, ["--no-state"]);
+	assert.ok(result.blockers.some((b) => b.code === "E_VERIFY_ERROR"));
+});
+
+// H5: a load-bearing claim that is BOTH verified_by (unsatisfied) AND a named residual falls
+// back to residual (converged-with-residuals) with a warning that a failure was masked
+check(
+	"strict: residual fallback when the verifier is unsatisfied -> exit 4 + warning",
+	() => {
+		const dir = tmpFixture({
+			"claims.json": [
+				lbClaim("c1", {
+					verified_by: { verifier: "ghost" },
+					tags: ["load-bearing", "residual"],
+					content:
+						"c1 — residual: oracle ghost is not available here, and this is why",
+				}),
+			],
+			"run.json": { verification: { mode: "strict" }, oracles: {} },
+		});
+		const { exit, result } = run(dir, ["--no-state"]);
+		assert.equal(result.status, "converged-with-residuals");
+		assert.equal(exit, 4);
+		assert.ok(
+			result.warnings.some((w) => w.code === "W_ORACLE_RESIDUAL_FALLBACK"),
+		);
+	},
+);
+
+// H4: bean-verify rejects ids that could escape the verdicts dir
+check("bean-verify rejects a traversal id (exit 3)", () => {
+	const dir = tmpFixture({
+		"claims.json": [lbClaim("c1")],
+		"run.json": { oracles: { unit: { cmd: PASS_CMD } } },
+	});
+	assert.equal(verify(dir, "../evil", "unit"), 3);
+});
+
+// H8: a plain 1.x ledger's certificate is unchanged by the (inert) 2.0 machinery
+check(
+	"certificate: an inert 2.0 path (compat, empty oracles) matches plain 1.x",
+	() => {
+		const claims = [lbClaim("c1"), { ...lbClaim("c2"), type: "constraint" }];
+		const plain = run(tmpFixture({ "claims.json": claims }), ["--no-state"]);
+		const inert = run(
+			tmpFixture({
+				"claims.json": claims,
+				"run.json": { verification: { mode: "compat" }, oracles: {} },
+			}),
+			["--no-state"],
+		);
+		assert.equal(plain.result.certificate, inert.result.certificate);
+	},
+);
+
+check(
+	"certificate: a 2.0-verified ledger differs from its compat reading (binds the regime)",
+	() => {
+		const claims = [lbClaim("c1", { verified_by: { verifier: "unit" } })];
+		const strictDir = tmpFixture({
+			"claims.json": claims,
+			"run.json": {
+				verification: { mode: "strict" },
+				oracles: { unit: { cmd: PASS_CMD } },
+			},
+		});
+		verify(strictDir, "c1", "unit");
+		const strict = run(strictDir, ["--no-state"]);
+		const compatDir = tmpFixture({ "claims.json": claims });
+		const compat = run(compatDir, ["--no-state"]);
+		assert.notEqual(strict.result.certificate, compat.result.certificate);
+		// determinism: a second strict read of the same ledger+verdict reproduces the cert
+		const strict2 = run(strictDir, ["--no-state"]);
+		assert.equal(strict.result.certificate, strict2.result.certificate);
+	},
+);
 
 console.log(`\n${passed} checks passed`);

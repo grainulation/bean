@@ -1,5 +1,48 @@
 # Changelog
 
+## 2.0.0 — unreleased (Core)
+
+**A gate with an oracle.** 1.x certifies the ledger is internally consistent — necessary but
+not sufficient: a ledger can converge cleanly on a _wrong interpretation_ (demonstrated — a
+green compile on a misread boundary still graded wrong). 2.0 adds an **external-verifier
+gate**: a load-bearing claim can be required to carry a real verifier's signal, not just a
+self-asserted tier.
+
+It delivers **auditable** verification, not correctness and not "leakage-safety" — a verifier
+that encodes the same misreading passes a wrong claim with an external badge (the over-trust
+limit, named not eliminated). This is the **Core** slice; the normative/harness-level pieces
+(sealed-read enforcement, answer-key classification) are deferred and labeled attestation.
+
+### The gate
+
+- **Modes** (`run.json` → `verification.mode`): `compat` (default — identical to 1.x,
+  certificates unchanged), `advisory` (warn via `W_UNVERIFIED`), `strict` (load-bearing
+  claims must be **verified or a named residual**).
+- **`bean-verify`** — a new, separate bin: the _only_ path that runs an oracle (declared
+  command, `argv`/`shell:false`, claim JSON on stdin). It records a **scrubbed, committed**
+  verdict (`.bean/verdicts/<claim>.<verifier>.json`; raw output stays local/gitignored).
+  `bean-check` stays a **pure adjudicator** — it reads verdicts, never executes.
+- **Gate on load-bearing _status_, not tier.** New blockers: `E_UNVERIFIED_LOADBEARING`,
+  `E_ORACLE_FAILED`, `E_ORACLE_STALE`, `E_ORACLE_UNDECLARED`, `E_VERIFY_ERROR`; warnings
+  `W_ORACLE_SINGLE`, `W_SEALED_UNENFORCED`.
+- **`converged-with-residuals`** — a distinct status / new **exit code 4**: no blockers, but
+  load-bearing claims rest on residuals rather than verification. Converged, but not clean.
+- **Determinism** — verdicts are recorded once and **replayed**, never re-run by `bean-check`;
+  staleness (claim content or pinned oracle changed) blocks. The certificate binds the full
+  regime (mode, load-bearing set, residual set, oracle registry, verdicts); a plain 1.x
+  ledger's certificate is **byte-identical** to before.
+
+### Compatibility
+
+`compat` is the default, so existing ledgers behave exactly as 1.x. Schema additions
+(`claim.verified_by`, `run.verification`/`run.oracles`, `result.verification`) are additive.
+Exit codes `0/1/2/3` are unchanged; `4` is added deliberately for residual-convergence.
+
+### Tests
+
+10 new behavioral checks for the gate (modes, undeclared/missing/failed/stale verdicts,
+residual-convergence, advisory warnings, certificate regime-binding) — 34 checks total.
+
 ## 1.2.0 — 2026-06-19
 
 The "not quite there" release. The core failure was _satisficing_: the loop under-delivered

@@ -93,6 +93,7 @@ check("all referenced reference files exist", () => {
 		"runtime-codex",
 		"grainulation",
 		"bean-check",
+		"oracle-gate",
 	];
 	for (const r of refs) {
 		const p = path.join(root, "skills/bean/references", `${r}.md`);
@@ -104,13 +105,18 @@ check("the Codex agent config exists", () => {
 	assert.ok(fs.existsSync(path.join(root, "skills/bean/agents/openai.yaml")));
 });
 
-check("bean-check compiler exists and is wired as a bin", () => {
+check("bean-check + bean-verify exist and are wired as bins", () => {
 	assert.ok(
 		fs.existsSync(path.join(root, "bin/bean-check.js")),
 		"missing bin/bean-check.js",
 	);
+	assert.ok(
+		fs.existsSync(path.join(root, "bin/bean-verify.js")),
+		"missing bin/bean-verify.js",
+	);
 	const pkg = json("package.json");
 	assert.equal(pkg.bin["bean-check"], "./bin/bean-check.js");
+	assert.equal(pkg.bin["bean-verify"], "./bin/bean-verify.js");
 });
 
 check("JSON schemas exist (claim, run, result)", () => {

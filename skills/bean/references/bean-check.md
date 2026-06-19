@@ -80,3 +80,12 @@ bean-check detects conflicts you have **linked** with `conflicts_with`; it does 
 semantic contradiction (that is the agent's job — notice it, record the link). It resolves
 nothing on its own: it blocks and hints; you do the auditable belief revision. When you are
 on bean-check rather than wheat, say so — wheat adds numeric confidence and richer analysis.
+
+## 2.0 — the oracle gate
+
+Internal consistency is not correctness: a ledger can converge on a wrong interpretation.
+bean 2.0 can require a load-bearing claim to carry a real external verifier's signal
+(`verified_by` an oracle declared in `run.json`), recorded by `bean-verify` and adjudicated
+by `bean-check`. It is **opt-in** (`verification.mode`: `compat` default / `advisory` /
+`strict`) and delivers _auditable_ verification, not correctness and not leakage-safety. See
+[oracle-gate.md](oracle-gate.md) for the contract, modes, blocker codes, and honest limits.

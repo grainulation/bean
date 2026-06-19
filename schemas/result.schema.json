@@ -13,7 +13,14 @@
 		"certificate"
 	],
 	"properties": {
-		"status": { "enum": ["ready", "blocked", "budget-exceeded"] },
+		"status": {
+			"enum": [
+				"ready",
+				"blocked",
+				"budget-exceeded",
+				"converged-with-residuals"
+			]
+		},
 		"blockers": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
 		"warnings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
 		"notes": { "type": "array", "items": { "type": "string" } },
@@ -23,6 +30,19 @@
 				"topics": { "type": "integer" },
 				"active": { "type": "integer" },
 				"total": { "type": "integer" }
+			}
+		},
+		"verification": {
+			"type": "object",
+			"description": "2.0 oracle-gate summary. Inactive (mode=compat, all-zero) for 1.x ledgers.",
+			"properties": {
+				"mode": { "enum": ["compat", "advisory", "strict"] },
+				"load_bearing": { "type": "integer" },
+				"verified": { "type": "integer" },
+				"residual": { "type": "integer" },
+				"unverified": { "type": "integer" },
+				"failed": { "type": "integer" },
+				"stale": { "type": "integer" }
 			}
 		},
 		"round": { "type": "integer" },

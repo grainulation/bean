@@ -14,11 +14,24 @@
  *
  *   bean-check [--dir <path>] [--json] [--quiet] [--no-state]
  *
- * Reads   <dir>/.bean/claims.json   (Bran-IR claims; array or { "claims": [...] })
- *         <dir>/.bean/run.json      (run contract; optional, sensible defaults)
- * Writes  <dir>/.bean/state.json    (loop-state for temporal checks; --no-state skips)
+ * Reads   <dir>/.bean/claims.json     (Bran-IR claims; array or { "claims": [...] })
+ *         <dir>/.bean/run.json        (run contract; optional, sensible defaults)
+ *         <dir>/.bean/verdicts/*.json (2.0: recorded oracle verdicts; written by bean-verify)
+ * Writes  <dir>/.bean/state.json      (loop-state for temporal checks; --no-state skips)
  *
- * Exit codes:  0 = ready (converged)   1 = blocked   2 = budget-exceeded   3 = usage/load error
+ * 2.0 — "a gate with an oracle". In `strict` mode a load-bearing claim converges
+ * only when it carries a passing, fresh, declared oracle verdict OR is a named
+ * residual. bean-check stays a PURE ADJUDICATOR: it READS recorded verdicts, it
+ * never executes an oracle (that is bean-verify). What 2.0 delivers is AUDITABLE
+ * verification, not "leakage-safe" verification and not correctness.
+ *
+ * Exit codes:
+ *   0 = ready (fully converged)
+ *   1 = blocked
+ *   2 = budget-exceeded
+ *   3 = usage/load error
+ *   4 = converged-with-residuals (no blockers, but load-bearing claims rest on
+ *       named residuals rather than verification — review warranted, not clean)
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -26,6 +39,8 @@ import crypto from "node:crypto";
 
 /** @typedef {"stated" | "web" | "documented" | "tested" | "production"} Tier */
 /** @typedef {"constraint" | "factual" | "estimate" | "risk" | "recommendation" | "feedback"} ClaimType */
+/** @typedef {"pass" | "fail" | "error"} Verdict */
+/** @typedef {"compat" | "advisory" | "strict"} Mode */
 /**
  * @typedef {Object} Claim
  * @property {string} id
@@ -39,6 +54,15 @@ import crypto from "node:crypto";
  * @property {string[]} [depends_on]
  * @property {string | null} [resolved_by]
  * @property {string[]} [tags]
+ * @property {{ verifier: string }} [verified_by]
+ */
+/**
+ * @typedef {Object} OracleSpec
+ * @property {string[]} [cmd]
+ * @property {string} [oracle_digest]
+ * @property {string[]} [inputs]
+ * @property {string} [trust]
+ * @property {number} [timeout_ms]
  */
 /**
  * @typedef {Object} Run
@@ -46,6 +70,18 @@ import crypto from "node:crypto";
  * @property {{ max_rounds?: number }} [budget]
  * @property {Object} [mutation_policy]
  * @property {string} [stakes]
+ * @property {{ mode?: Mode }} [verification]
+ * @property {Record<string, OracleSpec>} [oracles]
+ * @property {Object} [sealed_expected]
+ */
+/**
+ * @typedef {Object} Verdict_Artifact
+ * @property {string} claim
+ * @property {string} verifier
+ * @property {Verdict} verdict
+ * @property {string} [oracle_digest]
+ * @property {string} [inputs_hash]
+ * @property {string} claim_binding
  */
 /**
  * @typedef {Object} State
@@ -56,12 +92,23 @@ import crypto from "node:crypto";
  */
 /** @typedef {{ code: string } & Record<string, unknown>} Finding */
 /**
+ * @typedef {Object} VerificationSummary
+ * @property {Mode} mode
+ * @property {number} load_bearing
+ * @property {number} verified
+ * @property {number} residual
+ * @property {number} unverified
+ * @property {number} failed
+ * @property {number} stale
+ */
+/**
  * @typedef {Object} Result
- * @property {"ready" | "blocked" | "budget-exceeded"} status
+ * @property {"ready" | "blocked" | "budget-exceeded" | "converged-with-residuals"} status
  * @property {Finding[]} blockers
  * @property {Finding[]} warnings
  * @property {string[]} notes
  * @property {{ topics: number, active: number, total: number }} coverage
+ * @property {VerificationSummary} verification
  * @property {number} round
  * @property {number | null} max_rounds
  * @property {number} new_this_round
@@ -79,10 +126,45 @@ const TYPES = [
 	"recommendation",
 	"feedback",
 ];
+const MODES = ["compat", "advisory", "strict"];
 /** @param {string} t */
 const tierRank = (t) => TIERS.indexOf(t);
 /** @param {string} s */
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
+// A safe id contains no path separators / traversal — used for verdict filenames and to
+// reject ids that could escape .bean/verdicts. Must match bean-verify.js.
+/** @param {unknown} id @returns {boolean} */
+const safeId = (id) => typeof id === "string" && /^[A-Za-z0-9._-]+$/.test(id);
+
+// Hash a declared input set (explicit file paths, relative to baseDir). MUST match
+// bean-verify.js exactly so a recompute here equals what was recorded at verify time.
+/** @param {string} baseDir @param {string[]} inputs @returns {string} */
+function inputsHash(baseDir, inputs) {
+	if (!Array.isArray(inputs) || inputs.length === 0) return sha("");
+	const parts = [];
+	for (const rel of [...inputs].sort()) {
+		let h = "absent";
+		try {
+			const p = path.resolve(baseDir, rel);
+			const st = fs.statSync(p);
+			if (st.isFile()) h = sha(fs.readFileSync(p, "utf8"));
+		} catch {
+			h = "absent";
+		}
+		parts.push(`${rel}:${h}`);
+	}
+	return sha(parts.join("\n"));
+}
+// A declared oracle is usable only if it is an OWN, plain-object entry with a non-empty
+// argv `cmd`. Object.hasOwn defeats the prototype-pollution bypass (e.g. verifier "toString").
+/** @param {Record<string, OracleSpec>} oracles @param {string} name @returns {OracleSpec | null} */
+function oracleSpec(oracles, name) {
+	if (!Object.prototype.hasOwnProperty.call(oracles, name)) return null;
+	const o = oracles[name];
+	if (!o || typeof o !== "object" || Array.isArray(o)) return null;
+	if (!Array.isArray(o.cmd) || o.cmd.length === 0) return null;
+	return o;
+}
 
 // ---------------------------------------------------------------- args + load
 
@@ -145,6 +227,31 @@ function loadClaims(beanDir) {
 	if (!Array.isArray(claims))
 		return die(3, `${p} must be an array or { "claims": [...] }`);
 	return claims;
+}
+
+// Recorded oracle verdicts (2.0). bean-check READS these; it never runs an oracle.
+// Keyed by `${claim}::${verifier}`. A missing dir is fine (no verdicts recorded).
+/**
+ * @param {string} beanDir
+ * @returns {Map<string, Verdict_Artifact>}
+ */
+function loadVerdicts(beanDir) {
+	/** @type {Map<string, Verdict_Artifact>} */
+	const m = new Map();
+	const dir = path.join(beanDir, "verdicts");
+	if (!fs.existsSync(dir)) return m;
+	// Sorted for deterministic reads, and a verdict is admitted ONLY when its filename is the
+	// canonical `${claim}.${verifier}.json` for its own contents — so a renamed/duplicate file
+	// cannot shadow or flip a key by filesystem order (last-writer-wins is impossible).
+	for (const f of fs.readdirSync(dir).sort()) {
+		if (!f.endsWith(".json")) continue;
+		const a = loadJson(path.join(dir, f), null);
+		if (!a || typeof a !== "object" || !safeId(a.claim) || !safeId(a.verifier))
+			continue;
+		if (f !== `${a.claim}.${a.verifier}.json`) continue;
+		m.set(`${a.claim}::${a.verifier}`, a);
+	}
+	return m;
 }
 
 /** @type {Run} */
@@ -231,12 +338,22 @@ function dominance(a, b) {
  * @param {Claim[]} claims
  * @param {Run} run
  * @param {State | null} prior
+ * @param {Map<string, Verdict_Artifact>} [verdicts]
+ * @param {string} [baseDir]
  * @returns {Result}
  */
-function compile(claims, run, prior) {
+function compile(claims, run, prior, verdicts = new Map(), baseDir = ".") {
 	/** @type {Finding[]} */ const blockers = [];
 	/** @type {Finding[]} */ const warnings = [];
 	/** @type {string[]} */ const notes = [];
+
+	/** @type {Mode} */
+	const mode =
+		run.verification &&
+		typeof run.verification.mode === "string" &&
+		MODES.includes(run.verification.mode)
+			? run.verification.mode
+			: "compat";
 
 	// Partition first: only well-formed, unique-id claims participate. Malformed claims
 	// (non-objects, bad type/tier, missing id) and duplicate ids are recorded as blockers
@@ -304,7 +421,7 @@ function compile(claims, run, prior) {
 			if (!o || !isActive(o) || o.id === c.id) continue;
 			if (validResolver(c) || validResolver(o)) continue;
 			const [a, b] = c.id < o.id ? [c, o] : [o, c];
-			conflictPairs.set(`${a.id} ${b.id}`, [a, b]);
+			conflictPairs.set(`${a.id} ${b.id}`, [a, b]);
 		}
 	for (const [a, b] of conflictPairs.values()) {
 		const dom = dominance(a, b);
@@ -374,6 +491,141 @@ function compile(claims, run, prior) {
 				need: bar(c),
 			});
 
+	// 3b. THE ORACLE GATE (2.0). Off in `compat` (== 1.x). In `strict` a load-bearing claim
+	// converges only with a passing, fresh, DECLARED oracle verdict OR as a named residual;
+	// in `advisory` the same misses are warnings, never blockers. Gate on load-bearing
+	// STATUS, not tier — but skip a claim already failing the tier bar (can't verify a
+	// hunch). bean-check reads the recorded verdict; it never runs the oracle.
+	/** @type {VerificationSummary} */
+	const vsum = {
+		mode,
+		load_bearing: 0,
+		verified: 0,
+		residual: 0,
+		unverified: 0,
+		failed: 0,
+		stale: 0,
+	};
+	/** @type {string[]} */ const residualLoadBearing = [];
+	const usedVerifiers = new Set();
+	// what each VERIFIED claim was checked by — folded into the certificate so the cert binds
+	// the recorded oracle digest + inputs + claim binding, not just the verdict word.
+	/** @type {Map<string, string[]>} */ const verifiedInfo = new Map();
+	if (mode !== "compat") {
+		const oracles =
+			run.oracles && typeof run.oracles === "object" ? run.oracles : {};
+		// advisory degrades a blocker to a warning that PRESERVES the specific failure
+		// (E_ORACLE_FAILED -> W_ORACLE_FAILED), never a lossy generic.
+		/** @param {Finding} b */
+		const flag = (b) => {
+			if (mode === "strict") blockers.push(b);
+			else warnings.push({ ...b, code: b.code.replace(/^E_/, "W_") });
+		};
+		for (const c of active) {
+			if (!isLoadBearing(c) || isAbstention(c)) continue;
+			if (tierRank(c.evidence) < tierRank(bar(c))) continue; // already E_WEAK_LOADBEARING
+			vsum.load_bearing++;
+			const vb = c.verified_by;
+			const isResidual = hasTag(c, "residual") && hasReason(c);
+			// resolve the verifier outcome to a single blocker (or null = passed)
+			/** @type {Finding | null} */ let fail = null;
+			/** @type {Verdict_Artifact | undefined} */ let passArt;
+			let passVerifier = "";
+			if (vb && typeof vb === "object" && vb.verifier) {
+				const spec = oracleSpec(oracles, vb.verifier);
+				const art = verdicts.get(`${c.id}::${vb.verifier}`);
+				if (!spec)
+					fail = {
+						code: "E_ORACLE_UNDECLARED",
+						claim: c.id,
+						verifier: vb.verifier,
+					};
+				else if (!art)
+					fail = {
+						code: "E_VERIFY_ERROR",
+						claim: c.id,
+						verifier: vb.verifier,
+						reason: "no recorded verdict",
+					};
+				else {
+					// freshness binds claim content AND the oracle command AND the declared inputs;
+					// a pinned oracle_digest must also match. Any drift -> stale (fail-closed).
+					const wantDigest = sha(JSON.stringify(spec.cmd));
+					const wantInputs = inputsHash(baseDir, spec.inputs || []);
+					const pin =
+						typeof spec.oracle_digest === "string" ? spec.oracle_digest : null;
+					if (
+						art.claim_binding !== contentHash(c) ||
+						art.oracle_digest !== wantDigest ||
+						art.inputs_hash !== wantInputs ||
+						(pin !== null && pin !== wantDigest)
+					)
+						fail = {
+							code: "E_ORACLE_STALE",
+							claim: c.id,
+							verifier: vb.verifier,
+						};
+					else if (art.verdict === "fail")
+						fail = {
+							code: "E_ORACLE_FAILED",
+							claim: c.id,
+							verifier: vb.verifier,
+						};
+					else if (art.verdict !== "pass")
+						fail = {
+							code: "E_VERIFY_ERROR",
+							claim: c.id,
+							verifier: vb.verifier,
+						};
+					else {
+						passArt = art;
+						passVerifier = vb.verifier;
+					}
+				}
+			}
+
+			if (passArt) {
+				vsum.verified++;
+				usedVerifiers.add(passVerifier);
+				verifiedInfo.set(c.id, [
+					passVerifier,
+					passArt.verdict,
+					passArt.oracle_digest || "",
+					passArt.inputs_hash || "",
+					passArt.claim_binding,
+				]);
+			} else if (isResidual) {
+				// "verified OR named residual": a residual is the honest fallback when the
+				// verifier is absent/stale/failed. It converges-with-residuals, with a warning
+				// when it masked a real verifier failure (so the failure is never silent).
+				vsum.residual++;
+				residualLoadBearing.push(c.id);
+				if (fail)
+					warnings.push({
+						code: "W_ORACLE_RESIDUAL_FALLBACK",
+						claim: c.id,
+						masked: fail.code,
+					});
+			} else if (fail) {
+				flag(fail);
+				if (fail.code === "E_ORACLE_FAILED") vsum.failed++;
+				else if (fail.code === "E_ORACLE_STALE") vsum.stale++;
+				else vsum.unverified++;
+			} else {
+				flag({ code: "E_UNVERIFIED_LOADBEARING", claim: c.id, topic: c.topic });
+				vsum.unverified++;
+			}
+		}
+		// echo chamber: every verified load-bearing claim leans on one verifier
+		if (vsum.verified >= 2 && usedVerifiers.size === 1)
+			warnings.push({
+				code: "W_ORACLE_SINGLE",
+				verifier: [...usedVerifiers][0],
+			});
+		// sealed-output is an attestation bean-check cannot enforce (it sees no reads)
+		if (run.sealed_expected) warnings.push({ code: "W_SEALED_UNENFORCED" });
+	}
+
 	// 4. abstention on a load-bearing front is an open front, not a conclusion
 	for (const c of active)
 		if (isAbstention(c) && isLoadBearing(c))
@@ -414,10 +666,9 @@ function compile(claims, run, prior) {
 	// "dry" means nothing CHANGED — content / evidence / status, not just ids — so an
 	// in-place revision (same id, new content) still counts as progress.
 	const claimsHash = sha(
-		active
-			.map((c) => `${c.id} ${contentHash(c)} ${c.evidence}`)
-			.sort()
-			.join(""),
+		JSON.stringify(
+			active.map((c) => [c.id, contentHash(c), c.evidence]).sort(),
+		),
 	);
 	const dry = !!prior && prior.claims_hash === claimsHash;
 	const round = prior ? prior.round + (dry ? 0 : 1) : 1;
@@ -435,19 +686,51 @@ function compile(claims, run, prior) {
 			`OVER_BUDGET: round ${round} > max ${maxRounds} — deliver with open fronts named`,
 		);
 
-	// status: budget-exceeded is a "stop now, name the open fronts" terminal and takes
-	// precedence over blocked (the CLI contract: exit 2 means stop). Both keep their
-	// findings in the output regardless.
+	// status precedence: budget-exceeded (stop now) > blocked > converged-with-residuals
+	// (no blockers, but load-bearing claims rest on residuals, strict only) > ready.
 	let /** @type {Result["status"]} */ status = "ready";
 	if (overBudget) status = "budget-exceeded";
 	else if (blockers.length) status = "blocked";
+	else if (mode === "strict" && residualLoadBearing.length > 0)
+		status = "converged-with-residuals";
 
-	// certificate: reproducible proof over the converged status + each admitted claim's
-	// (id, evidence, content) — JSON-encoded so ids/values can't collide via delimiters.
+	// certificate: reproducible proof. 1.x identity is preserved byte-for-byte when no 2.0
+	// feature is in play (compat mode, no verified_by, no oracle registry). When 2.0 IS
+	// active the certificate binds the FULL adjudication universe — mode, the load-bearing
+	// classification, the residual set, the oracle registry, and each verdict — so two
+	// different verification regimes can never share a certificate.
+	const v20 =
+		mode !== "compat" ||
+		active.some((c) => c.verified_by) ||
+		Object.keys(run.oracles || {}).length > 0;
 	const admitted = active
-		.map((c) => [c.id, c.evidence, contentHash(c)])
+		.map((c) => {
+			/** @type {string[]} */
+			const t = [c.id, c.evidence, contentHash(c)];
+			// only a VERIFIED claim contributes verdict data (digest+inputs+binding), so the
+			// cert proves what was checked. v20=false => no claim appends => 1.x byte-identity.
+			if (v20) {
+				const info = verifiedInfo.get(c.id);
+				if (info) t.push(...info);
+			}
+			return t;
+		})
 		.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
-	const certificate = sha(JSON.stringify({ status, admitted })).slice(0, 16);
+	/** @type {Record<string, unknown>} */
+	const certObj = { status, admitted };
+	if (v20)
+		certObj.v = {
+			mode,
+			loadBearing: active
+				.filter(isLoadBearing)
+				.map((c) => c.id)
+				.sort(),
+			residual: [...residualLoadBearing].sort(),
+			oracles: Object.keys(run.oracles || {})
+				.sort()
+				.map((k) => `${k}:${(run.oracles || {})[k].oracle_digest || ""}`),
+		};
+	const certificate = sha(JSON.stringify(certObj)).slice(0, 16);
 
 	/** @type {State} */
 	const nextState = {
@@ -476,6 +759,7 @@ function compile(claims, run, prior) {
 			active: active.length,
 			total: claims.length,
 		},
+		verification: vsum,
 		round,
 		max_rounds: maxRounds ?? null,
 		new_this_round: newIds.length,
@@ -494,6 +778,7 @@ function render(r) {
 		ready: "READY",
 		blocked: "BLOCKED",
 		"budget-exceeded": "BUDGET",
+		"converged-with-residuals": "RESIDUALS",
 	}[r.status];
 	L.push(
 		`bean-check: ${mark}  (round ${r.round}${r.max_rounds ? "/" + r.max_rounds : ""}, +${r.new_this_round} new, cert ${r.certificate})`,
@@ -504,13 +789,20 @@ function render(r) {
 			hint = ` — supersede ${b.supersede} (keep ${b.keep}: ${b.reason}); verify better-grounded, then record it`;
 		else if (b.resolvable === false)
 			hint = " — genuine tie: resolve via the loop";
+		else if (b.verifier) hint = ` — verifier ${b.verifier}`;
 		L.push(
 			`  BLOCK ${b.code} ${b.claim || ""}${b.with ? " <> " + b.with : ""}${b.need ? ` (${b.have}<${b.need})` : ""}${hint}`,
 		);
 	}
 	for (const w of r.warnings)
-		L.push(`  warn  ${w.code} ${w.topic || w.claim || ""}`);
+		L.push(`  warn  ${w.code} ${w.topic || w.claim || w.verifier || ""}`);
 	for (const n of r.notes) L.push(`  note  ${n}`);
+	if (r.verification.mode !== "compat") {
+		const v = r.verification;
+		L.push(
+			`  verify (${v.mode}): ${v.verified} verified, ${v.residual} residual, ${v.unverified} unverified, ${v.failed} failed, ${v.stale} stale / ${v.load_bearing} load-bearing`,
+		);
+	}
 	L.push(
 		`  coverage: ${r.coverage.active}/${r.coverage.total} active across ${r.coverage.topics} topics`,
 	);
@@ -522,17 +814,18 @@ function main() {
 	if (a.help) {
 		process.stdout.write(
 			"bean-check [--dir <path>] [--json] [--quiet] [--no-state]\n" +
-				"Convergence compiler: exits 0=ready, 1=blocked, 2=budget-exceeded.\n",
+				"Convergence compiler: 0=ready, 1=blocked, 2=budget-exceeded, 4=converged-with-residuals.\n",
 		);
 		return 0;
 	}
 	const beanDir = path.join(a.dir, ".bean");
 	const claims = loadClaims(beanDir);
 	const run = mergeRun(loadJson(path.join(beanDir, "run.json"), {}));
+	const verdicts = loadVerdicts(beanDir);
 	const statePath = path.join(beanDir, "state.json");
 	const prior = a.state ? loadJson(statePath, null) : null;
 
-	const r = compile(claims, run, prior);
+	const r = compile(claims, run, prior, verdicts, a.dir);
 	if (a.state)
 		fs.writeFileSync(statePath, JSON.stringify(r._state, null, "\t") + "\n");
 	delete r._state;
@@ -541,7 +834,13 @@ function main() {
 	else if (a.quiet) process.stdout.write(`${r.status} ${r.certificate}\n`);
 	else process.stdout.write(render(r) + "\n");
 
-	return r.status === "ready" ? 0 : r.status === "budget-exceeded" ? 2 : 1;
+	return r.status === "ready"
+		? 0
+		: r.status === "converged-with-residuals"
+			? 4
+			: r.status === "budget-exceeded"
+				? 2
+				: 1;
 }
 
 process.exit(main());
