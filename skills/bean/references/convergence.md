@@ -90,12 +90,21 @@ keep it honest:
 - **Proportion the effort to the stakes.** A two-line fix does not earn a convergence
   loop or a browser-automation rig. If the trigger gate barely fired, do the small thing
   and stop.
-- **Asking the human is a legitimate way to close a front** — it's the "consult" move, and
-  it's often the cheapest. If a screenshot, a credential, or a one-word answer would save a
-  long token rabbit hole, ask for it instead of engineering around the human.
+- **Asking the human is the consult move of _last resort_, not a default off-ramp.** It's
+  the right call for a _genuine_ blocker — a credential, an access, an irreducible decision
+  you cannot derive. But do not stop to ask what you can investigate: if the answer is
+  reachable with the tools you have, drive and get it. **Satisficing** — punting an
+  investigable front back to the human, or trimming the loop short of its terminal states —
+  is the failure this guards against. (Proportion still applies: a trivial task doesn't earn
+  the loop at all. Proportion ≠ satisfice: the test is "is this front investigable?", not
+  "is this effortful?")
 - **Fix the cause, not the symptom.** "The error went away" is not the same as "I
   understand why it happened." Before calling a front closed, check you addressed the root,
   not just silenced the signal.
+- **Stay on the goal — re-anchor each round.** Restate the frame at the top of each round.
+  A side-front or nuance must either close a blocker _on the goal_ or be deferred — never
+  silently become the new goal. Drifting off the goal to chase little detours is its own
+  failure (goal-drift), the inverse of satisficing and just as costly.
 
 ## Knowing when to stop
 
@@ -123,3 +132,9 @@ confirmed/fixed/true-blocker, that itself is a dry round — stop.
 - **Dedup against everything seen, not just what survived.** When checking "new this
   round," compare against all claims ever raised, including rejected ones — otherwise a
   rejected idea reappears every round and the loop never converges.
+- **Internal convergence is not correctness.** The signal certifies the ledger is
+  self-consistent and grounded — it has _no oracle_ for whether you understood the task
+  right. An answer can converge cleanly against a wrong interpretation ("verified the wrong
+  thing"). Where an external signal exists (a real test, a ground-truth API), gate on _it_,
+  not on your self-built ledger. Where none exists, name the interpretation as an explicit
+  residual — never let "the ledger is consistent" read as "the answer is correct."

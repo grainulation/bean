@@ -31,6 +31,11 @@
 			"properties": { "origin": { "type": "string" } }
 		},
 		"conflicts_with": { "type": "array", "items": { "type": "string" } },
+		"depends_on": {
+			"type": "array",
+			"items": { "type": "string" },
+			"description": "Claim ids this claim relies on; bean-check flags it stale (E_STALE_DEPENDENT) if any becomes superseded/inactive."
+		},
 		"resolved_by": { "type": ["string", "null"] },
 		"tags": {
 			"type": "array",

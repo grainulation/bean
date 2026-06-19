@@ -36,6 +36,7 @@ import crypto from "node:crypto";
  * @property {Tier} evidence
  * @property {string} [status]
  * @property {string[]} [conflicts_with]
+ * @property {string[]} [depends_on]
  * @property {string | null} [resolved_by]
  * @property {string[]} [tags]
  */
@@ -275,12 +276,17 @@ function compile(claims, run, prior) {
 		const r = byId.get(c.resolved_by);
 		return !!r && isActive(r);
 	};
+	// A residual genuinely discharges a front only WITH a stated reason (the claim's
+	// content) — naming a residual without saying WHY it's unreachable is a silent punt.
+	/** @param {Claim} c */
+	const hasReason = (c) =>
+		typeof c.content === "string" && c.content.trim().length > 0;
 	/** @param {Claim} c */
 	const discharged = (c) =>
 		validResolver(c) ||
 		hasTag(c, "confirmed-non-issue") ||
-		hasTag(c, "residual") ||
-		hasTag(c, "accepted");
+		hasTag(c, "accepted") ||
+		(hasTag(c, "residual") && hasReason(c));
 
 	// 1. unresolved conflicts — SYMMETRIC pairing (a conflicts_with link from EITHER side
 	// registers the pair), fail-closed. A pair is cleared only when one side is inactive
@@ -322,6 +328,26 @@ function compile(claims, run, prior) {
 						resolvable: false,
 					},
 		);
+	}
+
+	// 1b. dependency integrity (truth-maintenance): a claim that depends_on a superseded or
+	// inactive claim is STALE — revising a support must reopen its dependents, not leave them
+	// standing. This is the mechanical enforcement of belief-revision propagation.
+	for (const c of active) {
+		if (c.depends_on !== undefined && !Array.isArray(c.depends_on)) {
+			// a present-but-malformed depends_on must not silently fail open
+			blockers.push({ code: "E_SCHEMA", claim: c.id });
+			continue;
+		}
+		for (const dep of c.depends_on || []) {
+			const d = byId.get(dep);
+			if (dep === c.id || !d || !isActive(d))
+				blockers.push({
+					code: "E_STALE_DEPENDENT",
+					claim: c.id,
+					depends_on: dep,
+				});
+		}
 	}
 
 	// 2. undischarged risk — recording a concern is not resolving it

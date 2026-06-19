@@ -72,6 +72,25 @@ already there. But if a front genuinely _cannot_ be made verifiable (the task as
 has no observable success condition), that's a framing problem: surface it and get the
 success criteria clarified with the human instead of spinning on an untestable goal.
 
+## Manufacture the check — and test the interpretation, not the execution
+
+When there is no ready-made oracle, **build one — at all costs.** Write and run an actual
+test, query a ground-truth source, or construct an independent check, rather than
+self-asserting "I verified." A loop that re-reads its own work confirms its own mistakes
+with rising confidence; an _executed, independent_ test can disagree with you. The cheapest
+way to be wrong-but-certain is to verify against your own restatement of the task.
+
+And verify the **interpretation**, not just the execution. The dangerous failure is not "my
+code errored" — it's "my code ran cleanly against the _wrong success criterion_." Before
+trusting a green check, ask: am I testing what the task actually asked, or what I _assumed_
+it asked? Probe the load-bearing ambiguous term against the real system (does "friends"
+mean "all contacts," or a distinct set the app tracks?). An answer that is internally
+consistent and self-verified can still be confidently wrong when the interpretation was
+wrong — and re-running your own logic never catches that; only an external signal or a
+test of the interpretation does. When the reading can't be pinned down from the system, it
+is a **residual**: deliver "converged against _this_ interpretation; the interpretation
+itself is unverified," never a clean "done."
+
 ## Per round: the compiler signal IS the failable check
 
 `compile` is the whole-task check that can fail: it returns unresolved conflicts, coverage

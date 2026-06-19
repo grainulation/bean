@@ -53,6 +53,7 @@ check("versions are synchronized across manifests", () => {
 	assert.equal(json(".claude-plugin/marketplace.json").metadata.version, v);
 	assert.equal(json(".claude-plugin/marketplace.json").plugins[0].version, v);
 	assert.equal(json(".codex-plugin/plugin.json").version, v);
+	assert.equal(json("package-lock.json").version, v);
 });
 
 // --- skill frontmatter ---

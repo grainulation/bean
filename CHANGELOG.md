@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.2.0 — 2026-06-19
+
+The "not quite there" release. The core failure was _satisficing_: the loop under-delivered
+its promised transparency and stopped to ask instead of driving, and a clean internal ledger
+read as a correct answer even when the task had been misunderstood. The fix is **test the
+interpretation, not the execution**, plus tighter enforcement.
+
+Measured on the AppWorld benchmark: on a task where the baseline misread the spec — it synced
+all 27 phone _contacts_ instead of the 8 phone _friends_ — the discipline took the result
+**2/5 → 5/5**. A four-task cross-test shows the effect is **real but narrow**: decisive on
+tasks where the baseline misinterprets, and a no-op (no regression) on the three of four where
+it already read the spec correctly. Treat it as insurance against interpretation errors, not a
+general per-task accuracy lift.
+
+### Loop discipline (the validated fix)
+
+- **Test the interpretation, not the execution** (`verify.md`): the dangerous failure is
+  code that runs cleanly against the _wrong success criterion_. Probe the load-bearing
+  ambiguous term against the real system; manufacture an external check at all costs rather
+  than self-asserting "I verified"; if the reading can't be pinned down, it is a residual.
+- **Relentlessness recalibration** (`convergence.md`): asking the human is the consult move
+  of _last resort_ (a genuine blocker), not a default off-ramp — don't punt what's
+  investigable. Proportion ≠ satisfice. Plus goal-persistence: re-anchor on the goal each
+  round; a detour must close a blocker on the goal or be deferred, never silently become it.
+- **Internal convergence ≠ correctness** (`convergence.md`): the gate certifies the ledger
+  is self-consistent; it has no oracle for whether the task was understood right. Gate on an
+  external signal where one exists; otherwise name the interpretation as a residual.
+
+### bean-check enforcement
+
+- **`E_STALE_DEPENDENT`** — a claim with `depends_on: [...]` blocks if any dependency is
+  superseded/inactive (mechanical belief-revision propagation; truth-maintenance).
+- **`residual` requires a reason** — tagging a front `residual` discharges it only when the
+  claim states _why_ it's unreachable; a reasonless residual is a silent punt and still blocks.
+- New `depends_on` field in the claim schema; three new behavioral fixtures (24 checks total).
+
+### Deferred
+
+- Saturation / state-v2 and the agent-authored round trace — Codex flagged these as the
+  riskiest to mechanize and they are not what produced the win; slated for a later release.
+
 ## 1.1.2 — 2026-06-15
 
 A robustness pass on `bean-check` from an independent cross-model (Codex) review that

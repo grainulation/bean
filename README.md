@@ -50,7 +50,7 @@ claude plugin install bean
 
 > _Pinning & updates._ bean installs into your agent's context, so treat it like any
 > third-party plugin: prefer a tagged release over a moving branch (pin a `--ref`, e.g.
-> `--ref v1.1.2`) and re-review on update. bean runs locally with no network surface by
+> `--ref v1.2.0`) and re-review on update. bean runs locally with no network surface by
 > default; the only optional outbound path is the grainulator/wheat remote dashboard, which
 > stays off unless you wire it in.
 

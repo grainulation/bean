@@ -52,8 +52,10 @@ is not reached**:
 node bin/bean-check.js --dir <path>     # 0 = ready, 1 = blocked, 2 = budget-exceeded
 ```
 
-It hard-blocks on: unresolved conflicts, undischarged risks (notice→act), load-bearing
-claims below the evidence bar, and load-bearing abstentions; it also tracks the temporal
+It hard-blocks on: unresolved conflicts, undischarged risks (notice→act; a `residual`
+discharges only with a stated reason), load-bearing claims below the evidence bar,
+load-bearing abstentions, and **stale dependents** (a claim whose `depends_on` points at a
+superseded/inactive claim); it also tracks the temporal
 checks a single-snapshot compiler can't — dry-round, budget, and rejected-claim
 reappearance — via a small `.bean/state.json`. On a conflict where one side strictly
 out-evidences the other it emits a belief-revision **hint** (supersede the weaker) but

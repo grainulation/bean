@@ -69,6 +69,17 @@ const cases = [
 	{ f: "asymmetric-conflict", status: "blocked", exit: 1, code: "E_CONFLICT" },
 	// regression: a risk cannot discharge itself (self id) or via a dangling resolved_by
 	{ f: "self-discharge", status: "blocked", exit: 1, code: "E_OPEN_RISK" },
+	// 1.2.0: a claim depending on a superseded/inactive claim is stale (TMS propagation)
+	{
+		f: "stale-dependent",
+		status: "blocked",
+		exit: 1,
+		code: "E_STALE_DEPENDENT",
+	},
+	// 1.2.0: a `residual` tag without a stated reason is a silent punt -> does not discharge
+	{ f: "residual-no-reason", status: "blocked", exit: 1, code: "E_OPEN_RISK" },
+	// 1.2.0: a `residual` WITH a reason genuinely discharges -> ready
+	{ f: "residual-with-reason", status: "ready", exit: 0 },
 ];
 for (const c of cases)
 	check(`${c.f} -> ${c.status} (exit ${c.exit})`, () => {
@@ -308,6 +319,52 @@ check("--dir with a missing value exits 3 (not a stack trace)", () => {
 		encoding: "utf8",
 	});
 	assert.equal(r.status, 3);
+});
+
+// --- 1.2.0 regressions: depends_on edge cases (found by Codex review) ---
+check("non-array depends_on does not fail open (E_SCHEMA)", () => {
+	const dir = tmpFixture({
+		"claims.json": [
+			{
+				id: "c1",
+				type: "factual",
+				topic: "t",
+				content: "x",
+				evidence: "tested",
+				status: "superseded",
+			},
+			{
+				id: "c2",
+				type: "recommendation",
+				topic: "t",
+				content: "do",
+				evidence: "tested",
+				depends_on: "c1",
+			},
+		],
+	});
+	const { exit, result } = run(dir, ["--no-state"]);
+	assert.equal(result.status, "blocked");
+	assert.ok(result.blockers.some((b) => b.code === "E_SCHEMA"));
+	assert.equal(exit, 1);
+});
+check("self depends_on is stale (E_STALE_DEPENDENT)", () => {
+	const dir = tmpFixture({
+		"claims.json": [
+			{
+				id: "c1",
+				type: "recommendation",
+				topic: "t",
+				content: "do",
+				evidence: "tested",
+				depends_on: ["c1"],
+			},
+		],
+	});
+	const { exit, result } = run(dir, ["--no-state"]);
+	assert.equal(result.status, "blocked");
+	assert.ok(result.blockers.some((b) => b.code === "E_STALE_DEPENDENT"));
+	assert.equal(exit, 1);
 });
 
 console.log(`\n${passed} checks passed`);
