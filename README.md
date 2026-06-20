@@ -10,10 +10,10 @@
 
 <h1 align="center">bean</h1>
 
-<p align="center"><strong>A recursive convergence loop for large tasks.</strong></p>
+<p align="center"><strong>A recursive convergence loop for large tasks — for Claude Code and Codex.</strong></p>
 
 <p align="center">
-A skill for Claude Code and Codex that runs a task the way the Fable model worked: investigate, record what you learn as evidence, let a compiler tell you what's still weak or contradictory, revise the beliefs that don't hold, and loop until the answer converges — then deliver.
+Run a task as a loop: investigate, record what you learn as typed claims, let a compiler tell you what's still weak, contradictory, or unverified, revise the beliefs that don't hold, and loop until it converges — then deliver. In 2.0 the runtime is a single Rust binary that couples to your agent natively, so the loop can't quietly stop early.
 </p>
 
 ---
@@ -23,114 +23,72 @@ A skill for Claude Code and Codex that runs a task the way the Fable model worke
 bean replaces "do these N phases" with "keep going until there's nothing decisive left to learn." It runs on a **runtime** — a claim ledger plus a compiler that scores convergence — and uses that signal to decide its own next move.
 
 - **Investigate the most decisive open front** — the compiler's signal (unresolved conflict, weakest-evidence claim, coverage gap) picks the target, not a fixed plan.
-- **Record evidence in a ledger** — typed claims at honest evidence tiers (`stated` → `production`). The ledger is bean's memory across rounds — its "own notes."
-- **Compile** — a check that can fail at the whole-task level: conflicts, gaps, single-source topics, weak evidence, and undischarged risks.
-- **Revise beliefs** — when new evidence overturns an earlier claim, supersede it ("kill the incorrect belief") rather than letting the contradiction stand.
-- **Loop until converged** — stop when there are no unresolved conflicts, the evidence bar is met, and a full round adds nothing new. High-stakes work gets an independent cross-model **Codex blindspot** check before declaring done.
-- **Continuous orchestration** — every round re-surveys the available skills/connectors and spins up subagents for whatever the compiler flagged next.
-- **Verbose by default** — each round surfaces the ledger, the compiler signal, the next move, and any belief it revised, so you can watch the answer converge.
+- **Record evidence in a ledger** — typed claims at honest evidence tiers (`stated` → `production`), the loop's memory across rounds.
+- **Compile** — a check that can _fail_ at the whole-task level: conflicts, gaps, weak evidence, undischarged risks.
+- **Gate on a real oracle (2.0)** — a load-bearing claim can require an external verifier (your test suite, a type check, a state assertion), not just a self-asserted tier. Internal consistency isn't correctness.
+- **Revise beliefs** — when new evidence overturns a claim, supersede it rather than letting the contradiction stand.
+- **Couple to execution (2.0)** — a native **Stop hook** in Claude Code and Codex won't let the agent finish a bean-tracked task until the loop converges. The runtime drives; the agent can't drift past it.
 
 ## Install
 
-**Step 1** — Add the marketplace (one-time):
+2.0 ships as a small **static binary** (no Node, no runtime dependencies) plus the `/bean` skill and the native hooks.
 
-```bash
-claude plugin marketplace add https://github.com/grainulation/bean.git
-```
-
-**Step 2** — Install:
-
-```bash
-claude plugin install bean
-```
-
-> Inside Claude Code, use `/plugin` instead of `claude plugin`.
-
-**Requirements:** Claude Code with Node.js >= 20.
-
-> _Pinning & updates._ bean installs into your agent's context, so treat it like any
-> third-party plugin: prefer a tagged release over a moving branch (pin a `--ref`, e.g.
-> `--ref v1.2.0`) and re-review on update. bean runs locally with no network surface by
-> default; the only optional outbound path is the grainulator/wheat remote dashboard, which
-> stays off unless you wire it in.
-
-<details>
-<summary><strong>Codex</strong></summary>
-
-```bash
-codex plugin marketplace add grainulation/bean --ref main
-codex plugin add bean@bean
-```
-
-On the Codex side bean is invoked explicitly as `/bean`
-(`allow_implicit_invocation: false`).
-
-</details>
-
-<details>
-<summary><strong>Alternative: clone directly</strong></summary>
+**Build from source** (needs [Rust](https://rustup.rs)):
 
 ```bash
 git clone https://github.com/grainulation/bean.git
 cd bean && ./install.sh
 ```
 
-</details>
+This builds the runtime (`bean-check`, `bean-verify`, `bean-run`, `bean-hook`), installs the `/bean` skill, and registers the native Stop hook for Claude Code and Codex.
+
+**Prebuilt binaries** (no Rust): download the tarball for your platform from the [latest release](https://github.com/grainulation/bean/releases) and put the binaries on your `PATH`.
+
+> The Claude Code marketplace install (`claude plugin install bean`) gives you the `/bean` skill and the hook config; the runtime binary still has to be present — build it with `./install.sh` or drop a prebuilt one in. Pin a tagged release (e.g. `v2.0.0`) and re-review on update.
 
 ## Use
 
 ```
 /bean <your task>
-/bean quiet <your task>   # run every step, report tersely (failures still surfaced)
+/bean quiet <your task>   # terse — failures still surfaced
 ```
 
-bean also triggers on phrases like "do this thoroughly", "be systematic", or "deep work
-mode", and when a task objectively spans multiple files, sources, or sessions. For a
-trivial one-pass task it stays out of the way. See [`EXAMPLE.md`](EXAMPLE.md) for a worked
-before/after.
+bean also triggers on "do this thoroughly", "be systematic", or when a task objectively spans multiple files, sources, or sessions. For a trivial one-pass task it stays out of the way. See [`EXAMPLE.md`](EXAMPLE.md) for a worked before/after.
 
 ## The loop
 
-Frame once, then iterate until the compiler signal goes green:
+| Step                  | What happens                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------ |
+| **Frame** (once)      | State the goal; seed the ledger with known constraints. Does the task earn the loop? |
+| **1. Survey**         | Re-assess available skills/subagents/connectors this round; read real data.          |
+| **2. Investigate**    | Attack the most decisive open front the compiler flagged; fan out subagents.         |
+| **3. Record**         | Write findings as typed claims at honest evidence tiers into the ledger.             |
+| **4. Compile**        | Score convergence; in strict mode, gate load-bearing claims on a real oracle.        |
+| **5. Revise beliefs** | Supersede claims that new evidence overturns; resolve conflicts.                     |
+| **6. Converged?**     | No unresolved conflicts + evidence bar (or oracle) met + a dry round → deliver.      |
 
-| Step                  | What happens                                                                          |
-| --------------------- | ------------------------------------------------------------------------------------- |
-| **Frame** (once)      | State the goal; seed the ledger with known constraints. Does the task earn the loop?  |
-| **1. Survey**         | Re-assess available skills/subagents/connectors this round; read real data.           |
-| **2. Investigate**    | Attack the most decisive open front the compiler flagged; fan out subagents.          |
-| **3. Record**         | Write findings as typed claims at honest evidence tiers into the ledger.              |
-| **4. Compile**        | Score convergence: conflicts, gaps, single-source, weak evidence, undischarged risks. |
-| **5. Revise beliefs** | Supersede claims that new evidence overturns; resolve conflicts.                      |
-| **6. Converged?**     | No unresolved conflicts + evidence bar met + a dry round → deliver. Else loop to 1.   |
+## The runtime (four binaries)
 
-## The runtime
+A single self-contained binary per tool — no install dependency. (The JS `bean-check` is kept as the conformance reference; the Rust runtime must match it byte-for-byte, including certificates.)
 
-bean runs on a claim ledger + a compiler. It **ships its own compiler — `bean-check`** — a
-zero-dependency Node CLI built from the [Bran](https://github.com/grainulation/grainulator)
-core that scores convergence and **exits nonzero until it is reached** (conflicts,
-undischarged risks, load-bearing claims below the evidence bar, dry-round, budget). That is
-the default control plane and runs anywhere Node does. **[grainulator/wheat](https://github.com/grainulation/grainulator)**
-is an optional richer backend; where neither can run, bean falls back to a hand-checked
-`bean-stalk.md` ledger. With grainulator connected, bean also taps the wider stack,
-degrading gracefully when a piece is absent:
+- **`bean-check`** — the compiler/gate. Reads `.bean/claims.json` (+ optional `run.json`) and exits nonzero until the loop converges: conflicts, undischarged risks, below-bar load-bearing claims, dry-round, budget — plus the 2.0 oracle gate. Emits a deterministic certificate.
+- **`bean-verify`** — the only path that runs an oracle: a declared command (argv, no shell, claim JSON on stdin); records a scrubbed verdict `bean-check` adjudicates.
+- **`bean-run`** — the driver: injects the compiler signal into the agent's prompt each round, records what it emits, enforces forward progress. Model-agnostic (`--agent "claude -p"` / `"codex exec -"`).
+- **`bean-hook`** — the native Stop hook for Claude Code and Codex: blocks the agent from finishing until the loop converges; inert when a project has no `.bean/` ledger.
 
-- **[wheat](https://github.com/grainulation/grainulator)** — the ledger + compiler; record claims and gate convergence on `wheat compile`.
-- **grainulator** — dispatch autoresearch subagents for investigation rounds.
-- **deepwiki** — corroborate external claims against real repositories.
-- **silo + connectors** — the canonical read surface for grounding claims in real data.
-- **farmer** — route the Codex blindspot review through the dashboard.
+The 2.0 oracle gate is opt-in via `run.json` → `verification.mode`: `compat` (default, == 1.x), `advisory` (warn), `strict` (require a passing oracle or a named residual). See [`skills/bean/references/oracle-gate.md`](skills/bean/references/oracle-gate.md).
 
-Details: [`skills/bean/references/grainulation.md`](skills/bean/references/grainulation.md).
+**[grainulator/wheat](https://github.com/grainulation/grainulator)** is an optional richer backend; bean works fully without it.
 
 ## Philosophy
 
-- **Lean.** Markdown, JSON, and one zero-dependency CLI (`bean-check`). No servers, no network, no telemetry, no runtime dependencies (TypeScript is a CI-only devDependency).
-- **A real gate.** `bean-check` makes convergence falsifiable — it exits nonzero until the loop honestly converges; grainulator/wheat is an optional richer backend.
-- **Verbose by default.** Show the ledger, the compiler signal, and the belief revisions — watch the answer converge.
+- **Lean.** One static binary, zero runtime dependencies, no network by default, no telemetry.
+- **A real gate.** `bean-check` makes convergence falsifiable; the oracle gate makes it _external_ — auditable verification, not a self-graded checkmark.
+- **Coupled, not advisory.** Native hooks mean the discipline can't be silently skipped — the honest end state Fable had and a plain skill can't.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). Run `npm run format` and `npm test` before a PR.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). Run `npm test` (Node reference + smoke) and `node test/conformance.mjs` (Rust differential) before a PR.
 
 ## License
 

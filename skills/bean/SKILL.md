@@ -22,9 +22,11 @@ real signal before declaring done, and improves from its own accumulated notes. 
 bean runs on a **runtime**: a _claim ledger_ (typed evidence with tiers, that can be
 superseded) plus a _compiler_ that scores convergence (conflicts, coverage gaps, weak
 evidence, undischarged risks) and **exits nonzero until it is reached**. bean ships its own
-zero-dependency compiler — `bean-check` — as the default, so the loop has a real gate
-anywhere Node runs; **grainulator/wheat** is an optional richer backend when present. See
-[references/runtime.md](references/runtime.md).
+self-contained compiler — `bean-check`, a single static binary — as the default, so the loop
+has a real gate that runs anywhere. In strict mode it gates load-bearing claims on a real
+external oracle (`verified_by` + `bean-verify`), and a native Stop hook (`bean-hook`) couples
+it to execution so the agent can't finish until it converges. **grainulator/wheat** is an
+optional richer backend when present. See [references/runtime.md](references/runtime.md).
 
 **A note on what this is.** bean shapes the _procedure_ a model follows, not its
 capability ceiling. The recursion and self-correction it prescribes are only as good as

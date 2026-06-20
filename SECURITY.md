@@ -6,11 +6,19 @@ The latest released minor version receives security updates.
 
 ## Reporting a vulnerability
 
-bean is a small, dependency-free skill: Markdown + JSON plus one zero-dependency Node CLI
-(`bean-check`) that reads and writes local `.bean/*.json` files. It makes no network calls
-and has no telemetry or runtime dependencies. The most likely concerns are prompt-injection
-or misleading guidance in the skill text rather than executable vulnerabilities; for the
-CLI, the surface is local file I/O only.
+bean is a small skill plus a self-contained runtime (Rust binaries, no runtime dependencies,
+no telemetry). `bean-check` is a pure adjudicator — it only reads/writes local `.bean/*`
+files and makes no network calls.
+
+The one execution surface to know about is the **2.0 oracle gate**: `bean-verify` (and the
+`bean-run` driver) run **commands you declare** in `.bean/run.json` `oracles` — arbitrary
+local code, by design, and they can reach the network if a declared command does. They run
+with `shell:false` (argv only, no shell interpolation) and only when you opt in
+(`verification.mode: strict`/`advisory` with a `verified_by` claim). Treat a `run.json` like
+a makefile: only run a ledger whose oracle commands you trust. The native Stop hook
+(`bean-hook`) only ever runs `bean-check` (no oracle execution) and is inert without a
+`.bean/` ledger. The other likely concern is prompt-injection or misleading guidance in the
+skill text.
 
 Please report any concern via GitHub Security Advisories on this repository (preferred),
 or by email to security@grainulator.app.
@@ -31,7 +39,8 @@ In scope:
 
 - Skill or reference text that could induce unsafe, destructive, or deceptive behavior.
 - Manifest content that misrepresents what the plugin does.
-- The `bean-check` CLI (`bin/bean-check.js`): local file handling and input parsing.
+- The runtime binaries (`rs/`): local file handling, input parsing, and the oracle-execution
+  path (`bean-verify`/`bean-run` running declared commands; `bean-hook` running `bean-check`).
 
 Out of scope:
 
