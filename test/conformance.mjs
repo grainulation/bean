@@ -251,7 +251,173 @@ for (const [name, agent, want, exit] of [
 }
 console.log(`${dpass}/2 driver smoke checks pass`);
 
-const total = pass + tpass + dpass;
-const totalN = fixtures.length + SCENARIOS.length + 2;
-console.log(`\n${total}/${totalN} conformance + driver checks pass`);
+// ---- oracle-gate behavior (bean-check 2.0 + bean-verify) ----
+// No JS reference for the gate on this branch, so these are assertion-based behavioral checks.
+const VERIFY = path.join(root, "rs", "target", "release", "bean-verify");
+const PASS_CMD = [process.execPath, "-e", "process.exit(0)"];
+const FAIL_CMD = [process.execPath, "-e", "process.exit(1)"];
+/** @param {Record<string,unknown>} files @param {{claim:string,verifier:string}[]} verifyFirst */
+const gate = (files, verifyFirst = []) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bean-gate-"));
+	fs.mkdirSync(path.join(dir, ".bean"));
+	for (const [n, body] of Object.entries(files))
+		fs.writeFileSync(path.join(dir, ".bean", n), JSON.stringify(body, null, 2));
+	for (const v of verifyFirst)
+		spawnSync(
+			VERIFY,
+			["--dir", dir, "--claim", v.claim, "--verifier", v.verifier],
+			{ encoding: "utf8" },
+		);
+	const r = spawnSync(RS, ["--dir", dir, "--json", "--no-state"], {
+		encoding: "utf8",
+	});
+	return { exit: r.status, result: JSON.parse(r.stdout) };
+};
+const lb = (id, extra = {}) => ({
+	id,
+	type: "factual",
+	topic: "t",
+	content: `claim ${id}`,
+	evidence: "tested",
+	tags: ["load-bearing"],
+	...extra,
+});
+const GATE_CASES = [
+	{
+		name: "strict: load-bearing, no verifier, no residual -> E_UNVERIFIED_LOADBEARING (1)",
+		files: {
+			"claims.json": [lb("c1")],
+			"run.json": { verification: { mode: "strict" } },
+		},
+		want: { status: "blocked", exit: 1, code: "E_UNVERIFIED_LOADBEARING" },
+	},
+	{
+		name: "strict: verified_by an undeclared oracle -> E_ORACLE_UNDECLARED",
+		files: {
+			"claims.json": [lb("c1", { verified_by: { verifier: "ghost" } })],
+			"run.json": { verification: { mode: "strict" }, oracles: {} },
+		},
+		want: { status: "blocked", exit: 1, code: "E_ORACLE_UNDECLARED" },
+	},
+	{
+		name: "strict: declared oracle PASS -> ready (0)",
+		files: {
+			"claims.json": [lb("c1", { verified_by: { verifier: "unit" } })],
+			"run.json": {
+				verification: { mode: "strict" },
+				oracles: { unit: { cmd: PASS_CMD } },
+			},
+		},
+		verify: [{ claim: "c1", verifier: "unit" }],
+		want: { status: "ready", exit: 0 },
+	},
+	{
+		name: "strict: declared oracle FAIL -> E_ORACLE_FAILED (1)",
+		files: {
+			"claims.json": [lb("c1", { verified_by: { verifier: "unit" } })],
+			"run.json": {
+				verification: { mode: "strict" },
+				oracles: { unit: { cmd: FAIL_CMD } },
+			},
+		},
+		verify: [{ claim: "c1", verifier: "unit" }],
+		want: { status: "blocked", exit: 1, code: "E_ORACLE_FAILED" },
+	},
+	{
+		name: "strict: load-bearing residual -> converged-with-residuals (4)",
+		files: {
+			"claims.json": [
+				{
+					id: "c1",
+					type: "recommendation",
+					topic: "p",
+					content: "judgment call, no oracle exists",
+					evidence: "documented",
+					tags: ["residual"],
+				},
+			],
+			"run.json": { verification: { mode: "strict" } },
+		},
+		want: { status: "converged-with-residuals", exit: 4 },
+	},
+	{
+		name: "advisory: no verifier -> ready (0) + W_UNVERIFIED_LOADBEARING",
+		files: {
+			"claims.json": [lb("c1")],
+			"run.json": { verification: { mode: "advisory" } },
+		},
+		want: { status: "ready", exit: 0, warn: "W_UNVERIFIED_LOADBEARING" },
+	},
+	{
+		name: "compat: gate inert -> ready (0)",
+		files: {
+			"claims.json": [lb("c1")],
+			"run.json": { verification: { mode: "compat" } },
+		},
+		want: { status: "ready", exit: 0 },
+	},
+];
+let gpass = 0;
+for (const c of GATE_CASES) {
+	const { exit, result } = gate(c.files, c.verify || []);
+	const codes = result.blockers.map((b) => b.code);
+	const warns = (result.warnings || []).map((w) => w.code);
+	const ok =
+		result.status === c.want.status &&
+		exit === c.want.exit &&
+		(!c.want.code || codes.includes(c.want.code)) &&
+		(!c.want.warn || warns.includes(c.want.warn));
+	if (ok) {
+		gpass++;
+		console.log(`  ok    ${c.name}`);
+	} else {
+		fails.push(c.name);
+		console.log(
+			`  DIFF  ${c.name}: got status=${result.status} exit=${exit} codes=${JSON.stringify(codes)} warns=${JSON.stringify(warns)}`,
+		);
+	}
+}
+// bean-verify exit codes
+{
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bean-vexit-"));
+	fs.mkdirSync(path.join(dir, ".bean"));
+	fs.writeFileSync(
+		path.join(dir, ".bean", "claims.json"),
+		JSON.stringify([lb("c1")]),
+	);
+	fs.writeFileSync(
+		path.join(dir, ".bean", "run.json"),
+		JSON.stringify({ oracles: { p: { cmd: PASS_CMD }, f: { cmd: FAIL_CMD } } }),
+	);
+	const pe = spawnSync(VERIFY, [
+		"--dir",
+		dir,
+		"--claim",
+		"c1",
+		"--verifier",
+		"p",
+	]).status;
+	const fe = spawnSync(VERIFY, [
+		"--dir",
+		dir,
+		"--claim",
+		"c1",
+		"--verifier",
+		"f",
+	]).status;
+	if (pe === 0 && fe === 1) {
+		gpass++;
+		console.log("  ok    bean-verify exit codes (pass 0 / fail 1)");
+	} else {
+		fails.push("bean-verify exit codes");
+		console.log(`  DIFF  bean-verify exit codes: pass=${pe} fail=${fe}`);
+	}
+}
+console.log(
+	`${gpass}/${GATE_CASES.length + 1} oracle-gate behavior checks pass`,
+);
+
+const total = pass + tpass + dpass + gpass;
+const totalN = fixtures.length + SCENARIOS.length + 2 + GATE_CASES.length + 1;
+console.log(`\n${total}/${totalN} conformance + driver + gate checks pass`);
 process.exit(fails.length ? 1 : 0);

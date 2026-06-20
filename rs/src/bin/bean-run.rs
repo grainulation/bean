@@ -38,7 +38,9 @@ fn bean_check_path() -> PathBuf {
 }
 
 fn load_value(p: &Path) -> Option<Value> {
-    std::fs::read_to_string(p).ok().and_then(|t| serde_json::from_str(&t).ok())
+    std::fs::read_to_string(p)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
 }
 
 fn read_claims(bean_dir: &Path) -> Vec<Value> {
@@ -102,7 +104,10 @@ fn parse_claims(out: &str) -> Vec<Value> {
     }
     for (a, b) in spans.iter().rev() {
         if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(&out[*a..*b]) {
-            return arr.into_iter().filter(|c| c.get("id").and_then(|v| v.as_str()).is_some()).collect();
+            return arr
+                .into_iter()
+                .filter(|c| c.get("id").and_then(|v| v.as_str()).is_some())
+                .collect();
         }
     }
     vec![]
@@ -154,13 +159,22 @@ fn render_prompt(goal: &str, sig: &Value, claims: &[Value]) -> String {
                     c.get("type").and_then(|v| v.as_str()).unwrap_or(""),
                     c.get("evidence").and_then(|v| v.as_str()).unwrap_or(""),
                     c.get("topic").and_then(|v| v.as_str()).unwrap_or(""),
-                    c.get("content").and_then(|v| v.as_str()).unwrap_or("").chars().take(120).collect::<String>(),
+                    c.get("content")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .chars()
+                        .take(120)
+                        .collect::<String>(),
                 )
             })
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let blockers = sig.get("blockers").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let blockers = sig
+        .get("blockers")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
     let blk = if blockers.is_empty() {
         "  (none)".to_string()
     } else {
@@ -184,7 +198,9 @@ LEDGER (active claims):\n{}\n\nDo the real work to drive the top blocker, then e
 array of claim objects recording what you established (new claims or upserts by id). Emit [] if \
 nothing changed. The JSON array must be the LAST thing you print, on its own.",
         sig.get("status").and_then(|v| v.as_str()).unwrap_or(""),
-        sig.get("certificate").and_then(|v| v.as_str()).unwrap_or(""),
+        sig.get("certificate")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
         blk,
         ledger,
     )
@@ -192,7 +208,10 @@ nothing changed. The JSON array must be the LAST thing you print, on its own.",
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut dir = std::env::current_dir().unwrap().to_string_lossy().to_string();
+    let mut dir = std::env::current_dir()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
     let mut agent = String::new();
     let mut max_rounds = 8i64;
     let mut json_out = false;
@@ -201,15 +220,24 @@ fn main() {
         match args[i].as_str() {
             "--dir" => {
                 i += 1;
-                dir = args.get(i).cloned().unwrap_or_else(|| die(3, "--dir requires a path"));
+                dir = args
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| die(3, "--dir requires a path"));
             }
             "--agent" => {
                 i += 1;
-                agent = args.get(i).cloned().unwrap_or_else(|| die(3, "--agent requires a command"));
+                agent = args
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_else(|| die(3, "--agent requires a command"));
             }
             "--max-rounds" => {
                 i += 1;
-                max_rounds = args.get(i).and_then(|x| x.parse().ok()).unwrap_or_else(|| die(3, "--max-rounds needs an int"));
+                max_rounds = args
+                    .get(i)
+                    .and_then(|x| x.parse().ok())
+                    .unwrap_or_else(|| die(3, "--max-rounds needs an int"));
             }
             "--json" => json_out = true,
             "-h" | "--help" => {
@@ -235,7 +263,8 @@ fn main() {
             .args(["--dir", &dir, "--json", "--no-state"])
             .output()
             .unwrap_or_else(|e| die(3, &format!("bean-check failed: {e}")));
-        serde_json::from_slice(&o.stdout).unwrap_or_else(|_| die(3, "bean-check did not return JSON"))
+        serde_json::from_slice(&o.stdout)
+            .unwrap_or_else(|_| die(3, "bean-check did not return JSON"))
     };
 
     let mut trace: Vec<Value> = vec![];
@@ -245,8 +274,16 @@ fn main() {
         let mut claims = read_claims(&bean_dir);
         let sig = compile();
         let status = sig.get("status").and_then(|v| v.as_str()).unwrap_or("");
-        let cert = sig.get("certificate").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let has_blockers = sig.get("blockers").and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false);
+        let cert = sig
+            .get("certificate")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let has_blockers = sig
+            .get("blockers")
+            .and_then(|v| v.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false);
         if status == "ready" {
             outcome = "ready";
             break;
@@ -279,7 +316,9 @@ fn main() {
         write_claims(&bean_dir, &claims);
         trace.push(serde_json::json!({ "round": round, "status": status, "certificate": cert, "recorded": recorded }));
         if !json_out {
-            eprintln!("bean-run: round {round} {status} (cert {cert}) — recorded {recorded} claim(s)");
+            eprintln!(
+                "bean-run: round {round} {status} (cert {cert}) — recorded {recorded} claim(s)"
+            );
         }
     }
 
@@ -298,8 +337,14 @@ fn main() {
             "bean-run: {} after {} round(s) — {} (cert {})",
             outcome,
             trace.len(),
-            final_sig.get("status").and_then(|v| v.as_str()).unwrap_or(""),
-            final_sig.get("certificate").and_then(|v| v.as_str()).unwrap_or("")
+            final_sig
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+            final_sig
+                .get("certificate")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
         );
     }
     exit(match outcome {

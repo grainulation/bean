@@ -2,14 +2,15 @@
 //
 // Reconverges with the Bran core (already Rust): a single static binary with no install
 // dependency — the portability bean-check.js could not give, since Node is itself a dep.
-// Ports the static checks AND the temporal checks (state.json / dry-round / budget); held to
-// the JS reference by a differential conformance oracle (test/conformance.mjs): JS and Rust
-// must agree on status + blockers + certificate + persisted state for every fixture/scenario.
-// Still to come (later slices): the 2.0 oracle gate (verified_by) and the native hooks.
+// Ports the static checks, the temporal checks (state.json / dry-round / budget), AND the 2.0
+// oracle gate (verification mode + verified_by + recorded verdicts, with bean-verify). Held to
+// the JS reference by a differential conformance oracle (test/conformance.mjs) for static +
+// temporal, plus assertion-based behavioral checks for the oracle gate.
 //
 //   bean-check --dir <path> [--json] [--no-state]
 //
-// Exit: 0 = ready, 1 = blocked, 2 = budget-exceeded, 3 = usage/load error.
+// Exit: 0 = ready, 1 = blocked, 2 = budget-exceeded, 3 = usage/load error,
+//       4 = converged-with-residuals.
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -73,6 +74,36 @@ fn content_hash(c: &Value) -> String {
     let topic = s(c, "topic").unwrap_or("").to_lowercase();
     let content = s(c, "content").unwrap_or("").trim().to_lowercase();
     sha_hex(&format!("{ty}|{topic}|{content}"))
+}
+// matches bean-verify: ids that can't escape the verdicts dir
+fn safe_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+}
+// matches bean-verify's inputs_hash exactly (so a recompute equals what was recorded)
+fn inputs_hash(base: &std::path::Path, inputs: &[Value]) -> String {
+    let mut paths: Vec<String> = inputs
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+    if paths.is_empty() {
+        return sha_hex("");
+    }
+    paths.sort();
+    let mut parts = vec![];
+    for rel in &paths {
+        let p = base.join(rel);
+        let h = match std::fs::metadata(&p) {
+            Ok(m) if m.is_file() => std::fs::read_to_string(&p)
+                .map(|c| sha_hex(&c))
+                .unwrap_or_else(|_| "absent".into()),
+            _ => "absent".into(),
+        };
+        parts.push(format!("{rel}:{h}"));
+    }
+    sha_hex(&parts.join("\n"))
 }
 
 #[derive(Clone)]
@@ -138,6 +169,9 @@ fn main() {
     let mut bar_lb = "tested".to_string();
     let mut bar_rec = "documented".to_string();
     let mut max_rounds: Option<i64> = Some(6); // DEFAULT_RUN.budget.max_rounds
+    let mut mode = "compat".to_string(); // 2.0 oracle gate: compat | advisory | strict
+    let mut oracles = serde_json::Map::new();
+    let mut sealed_expected = false;
     if let Ok(rt) = std::fs::read_to_string(bean_dir.join("run.json")) {
         if let Ok(rj) = serde_json::from_str::<Value>(&rt) {
             if let Some(eb) = rj.get("evidence_bar") {
@@ -155,6 +189,44 @@ fn main() {
             // mergeRun: a run.json budget object replaces the default; max_rounds may be absent
             if let Some(budget) = rj.get("budget") {
                 max_rounds = budget.get("max_rounds").and_then(|v| v.as_i64());
+            }
+            if let Some(m) = rj
+                .get("verification")
+                .and_then(|v| v.get("mode"))
+                .and_then(|v| v.as_str())
+            {
+                if ["compat", "advisory", "strict"].contains(&m) {
+                    mode = m.into();
+                }
+            }
+            if let Some(o) = rj.get("oracles").and_then(|v| v.as_object()) {
+                oracles = o.clone();
+            }
+            sealed_expected = rj.get("sealed_expected").is_some();
+        }
+    }
+    // recorded verdicts: .bean/verdicts/<claim>.<verifier>.json, admitted only under their
+    // canonical filename (no last-writer-wins / shadowing), sorted for determinism.
+    let mut verdicts: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+    if let Ok(rd) = std::fs::read_dir(bean_dir.join("verdicts")) {
+        let mut files: Vec<_> = rd.filter_map(|e| e.ok().map(|e| e.path())).collect();
+        files.sort();
+        for p in files {
+            if p.extension().and_then(|x| x.to_str()) != Some("json") {
+                continue;
+            }
+            if let Some(a) = std::fs::read_to_string(&p)
+                .ok()
+                .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            {
+                let cl = a.get("claim").and_then(|v| v.as_str()).unwrap_or("");
+                let vf = a.get("verifier").and_then(|v| v.as_str()).unwrap_or("");
+                if safe_id(cl)
+                    && safe_id(vf)
+                    && p.file_name().and_then(|n| n.to_str()) == Some(&format!("{cl}.{vf}.json"))
+                {
+                    verdicts.insert(format!("{cl}::{vf}"), a);
+                }
             }
         }
     }
@@ -347,6 +419,156 @@ fn main() {
         notes.push("EMPTY_LEDGER: no active claims to converge".into());
     }
 
+    // ---- 5. THE ORACLE GATE (2.0). compat=off; advisory=warn; strict=block. Gate on
+    // load-bearing STATUS (not tier). bean-check reads recorded verdicts; never runs an oracle.
+    let mut residual_load_bearing: Vec<String> = vec![];
+    let mut verified_info: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    if mode != "compat" {
+        let base = std::path::Path::new(&dir);
+        let mut used_verifiers: Vec<String> = vec![];
+        for c in &active {
+            if !is_load_bearing(c) || is_abstention(c) {
+                continue;
+            }
+            let bar = if s(c, "type") == Some("recommendation") {
+                &bar_rec
+            } else {
+                &bar_lb
+            };
+            if tier_rank(s(c, "evidence").unwrap_or("")) < tier_rank(bar) {
+                continue; // already E_WEAK_LOADBEARING
+            }
+            let is_residual = has_tag(c, "residual") && has_reason(c);
+            let mut fail: Option<Blocker> = None;
+            let mut passed = false;
+            let mut pass_verifier = String::new();
+            let vb = c
+                .get("verified_by")
+                .and_then(|v| v.get("verifier"))
+                .and_then(|v| v.as_str());
+            if let Some(vname) = vb {
+                let spec = oracles.get(vname).filter(|v| {
+                    v.is_object()
+                        && v.get("cmd")
+                            .and_then(|x| x.as_array())
+                            .map(|a| !a.is_empty())
+                            .unwrap_or(false)
+                });
+                let art = verdicts.get(&format!("{}::{}", id_of(c), vname));
+                match (spec, art) {
+                    (None, _) => {
+                        let mut blk = b("E_ORACLE_UNDECLARED", id_of(c));
+                        blk.extra
+                            .push(("verifier".into(), Value::String(vname.into())));
+                        fail = Some(blk);
+                    }
+                    (Some(_), None) => {
+                        let mut blk = b("E_VERIFY_ERROR", id_of(c));
+                        blk.extra
+                            .push(("verifier".into(), Value::String(vname.into())));
+                        fail = Some(blk);
+                    }
+                    (Some(sp), Some(a)) => {
+                        let cmd = sp.get("cmd").unwrap();
+                        let want_digest = sha_hex(&serde_json::to_string(cmd).unwrap());
+                        let inputs = sp
+                            .get("inputs")
+                            .and_then(|v| v.as_array())
+                            .cloned()
+                            .unwrap_or_default();
+                        let want_inputs = inputs_hash(base, &inputs);
+                        let stale = a.get("claim_binding").and_then(|v| v.as_str())
+                            != Some(content_hash(c).as_str())
+                            || a.get("oracle_digest").and_then(|v| v.as_str())
+                                != Some(want_digest.as_str())
+                            || a.get("inputs_hash").and_then(|v| v.as_str())
+                                != Some(want_inputs.as_str());
+                        let verdict = a.get("verdict").and_then(|v| v.as_str()).unwrap_or("");
+                        let mut mk = |code: &str| {
+                            let mut blk = b(code, id_of(c));
+                            blk.extra
+                                .push(("verifier".into(), Value::String(vname.into())));
+                            Some(blk)
+                        };
+                        if stale {
+                            fail = mk("E_ORACLE_STALE");
+                        } else if verdict == "fail" {
+                            fail = mk("E_ORACLE_FAILED");
+                        } else if verdict != "pass" {
+                            fail = mk("E_VERIFY_ERROR");
+                        } else {
+                            passed = true;
+                            pass_verifier = vname.into();
+                        }
+                    }
+                }
+            }
+            if passed {
+                used_verifiers.push(pass_verifier.clone());
+                let a = verdicts
+                    .get(&format!("{}::{}", id_of(c), pass_verifier))
+                    .unwrap();
+                verified_info.insert(
+                    id_of(c).into(),
+                    vec![
+                        pass_verifier,
+                        a.get("verdict")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .into(),
+                        a.get("oracle_digest")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .into(),
+                        a.get("inputs_hash")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .into(),
+                        a.get("claim_binding")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .into(),
+                    ],
+                );
+            } else if is_residual {
+                residual_load_bearing.push(id_of(c).into());
+                if let Some(f) = &fail {
+                    let mut w = b("W_ORACLE_RESIDUAL_FALLBACK", id_of(c));
+                    w.extra
+                        .push(("masked".into(), Value::String(f.code.clone())));
+                    warnings.push(w);
+                }
+            } else {
+                let blk = fail.unwrap_or_else(|| {
+                    let mut x = b("E_UNVERIFIED_LOADBEARING", id_of(c));
+                    if let Some(t) = s(c, "topic") {
+                        x.extra.push(("topic".into(), Value::String(t.into())));
+                    }
+                    x
+                });
+                // advisory degrades blocker -> warning preserving the specific code (E_ -> W_)
+                if mode == "strict" {
+                    blockers.push(blk);
+                } else {
+                    let mut w = blk.clone();
+                    w.code = blk.code.replacen("E_", "W_", 1);
+                    warnings.push(w);
+                }
+            }
+        }
+        let distinct: std::collections::HashSet<&String> = used_verifiers.iter().collect();
+        if used_verifiers.len() >= 2 && distinct.len() == 1 {
+            let mut w = b("W_ORACLE_SINGLE", "");
+            w.extra
+                .push(("verifier".into(), Value::String(used_verifiers[0].clone())));
+            warnings.push(w);
+        }
+        if sealed_expected {
+            warnings.push(b("W_SEALED_UNENFORCED", ""));
+        }
+    }
+
     // prior state
     let mut prior: Option<Value> = None;
     if state_enabled {
@@ -434,33 +656,75 @@ fn main() {
         ));
     }
 
+    // status precedence: budget-exceeded > blocked > converged-with-residuals (strict, no
+    // blockers but load-bearing claims rest on residuals) > ready.
     let status = if over_budget {
         "budget-exceeded"
     } else if !blockers.is_empty() {
         "blocked"
+    } else if mode == "strict" && !residual_load_bearing.is_empty() {
+        "converged-with-residuals"
     } else {
         "ready"
     };
 
-    // certificate: sha256(JSON({status, admitted})), admitted = sorted [id,evidence,hash].
-    // Hand-built to match JS JSON.stringify byte-for-byte (status-first key order, compact).
-    let mut admitted: Vec<[String; 3]> = active
+    // certificate: sha256(JSON({status, admitted})). When NO 2.0 feature is in play the cert is
+    // byte-identical to the JS reference (v20=false). When the oracle gate is active the cert
+    // binds the full regime (mode, load-bearing set, residual set, oracle registry, verdicts).
+    let v20 = mode != "compat"
+        || active.iter().any(|c| c.get("verified_by").is_some())
+        || !oracles.is_empty();
+    let mut admitted: Vec<Vec<String>> = active
         .iter()
         .map(|c| {
-            [
+            let mut t = vec![
                 id_of(c).to_string(),
                 s(c, "evidence").unwrap_or("").to_string(),
                 content_hash(c),
-            ]
+            ];
+            if v20 {
+                if let Some(info) = verified_info.get(id_of(c)) {
+                    t.extend(info.clone());
+                }
+            }
+            t
         })
         .collect();
     admitted.sort_by(|x, y| x[0].cmp(&y[0]));
-    let cert_str = format!(
-        "{{\"status\":{},\"admitted\":{}}}",
-        serde_json::to_string(status).unwrap(),
-        serde_json::to_string(&admitted).unwrap(),
-    );
-    let certificate = sha_hex(&cert_str)[..16].to_string();
+    let certificate = if v20 {
+        let mut lb: Vec<String> = active
+            .iter()
+            .filter(|c| is_load_bearing(c))
+            .map(|c| id_of(c).to_string())
+            .collect();
+        lb.sort();
+        let mut res = residual_load_bearing.clone();
+        res.sort();
+        let mut orc: Vec<String> = oracles
+            .iter()
+            .map(|(k, v)| {
+                format!(
+                    "{k}:{}",
+                    v.get("oracle_digest")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                )
+            })
+            .collect();
+        orc.sort();
+        let regime =
+            serde_json::json!({ "mode": mode, "loadBearing": lb, "residual": res, "oracles": orc });
+        let obj = serde_json::json!({ "status": status, "admitted": admitted, "v": regime });
+        sha_hex(&serde_json::to_string(&obj).unwrap())[..16].to_string()
+    } else {
+        // hand-built to match JS JSON.stringify byte-for-byte (status-first key order, compact)
+        let cert_str = format!(
+            "{{\"status\":{},\"admitted\":{}}}",
+            serde_json::to_string(status).unwrap(),
+            serde_json::to_string(&admitted).unwrap(),
+        );
+        sha_hex(&cert_str)[..16].to_string()
+    };
 
     // write next state (unless --no-state)
     if state_enabled {
@@ -525,6 +789,7 @@ fn main() {
 
     exit(match status {
         "ready" => 0,
+        "converged-with-residuals" => 4,
         "budget-exceeded" => 2,
         _ => 1,
     });
