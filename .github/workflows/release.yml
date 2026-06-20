@@ -9,15 +9,17 @@ permissions:
   contents: write
 
 jobs:
-  # Build the runtime on a NATIVE runner per platform (no cross-compilation), package the four
-  # binaries into a per-target tarball, and upload as a workflow artifact.
+  # Build each target with an explicit --target on a readily-available host (the x86_64 macOS
+  # binary is cross-compiled from the arm runner — no scarce Intel runner needed). Package the
+  # four binaries into a per-target tarball and upload as a workflow artifact.
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
-          - os: macos-13
+          - os: macos-latest
             target: x86_64-apple-darwin
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -27,15 +29,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - name: Build (release)
-        run: cargo build --release --manifest-path rs/Cargo.toml
+        run: cargo build --release --target ${{ matrix.target }} --manifest-path rs/Cargo.toml
       - name: Package
         run: |
           set -eu
           dir="bean-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          out="rs/target/${{ matrix.target }}/release"
           mkdir -p "$dir"
-          cp rs/target/release/bean-check rs/target/release/bean-verify \
-             rs/target/release/bean-run rs/target/release/bean-hook "$dir"/
+          cp "$out"/bean-check "$out"/bean-verify "$out"/bean-run "$out"/bean-hook "$dir"/
           cp README.md LICENSE "$dir"/ 2>/dev/null || true
           tar -czf "$dir.tar.gz" "$dir"
           shasum -a 256 "$dir.tar.gz" > "$dir.tar.gz.sha256"
