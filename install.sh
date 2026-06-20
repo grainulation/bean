@@ -1,25 +1,46 @@
 #!/usr/bin/env bash
 #
-# bean installer (fallback to the plugin marketplace).
-# Copies the bean skill + command into your Claude Code config, and the skill into
-# your Codex config when present. Documentation-only: no dependencies, no servers.
+# bean installer — builds the Rust runtime and wires it into Claude Code (and Codex).
+#
+# What you get after this:
+#   - the bean runtime binaries (bean-check, bean-verify, bean-run, bean-hook) built into ./bin
+#   - the /bean skill installed
+#   - a native Stop hook registered so bean COUPLES to execution: an agent can't finish a
+#     bean-tracked task (one with a .bean/ ledger) until the loop converges. Inert otherwise.
 #
 # Usage:
-#   ./install.sh                 # install for the current user
-#   CLAUDE_CONFIG_DIR=... ./install.sh
+#   ./install.sh                         # build + install for the current user
+#   CLAUDE_CONFIG_DIR=... ./install.sh   # custom Claude config dir
 #
+# Requires: Rust (cargo). No runtime dependencies — the binaries are self-contained.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 CODEX_DIR="${CODEX_CONFIG_DIR:-$HOME/.codex}"
+
+build_runtime() {
+	command -v cargo >/dev/null 2>&1 || {
+		echo "  ERROR: cargo (Rust) is required to build the bean runtime." >&2
+		echo "         Install from https://rustup.rs and re-run." >&2
+		exit 1
+	}
+	echo "  building the Rust runtime (release)..."
+	cargo build --release --quiet --manifest-path "$REPO_DIR/rs/Cargo.toml"
+	mkdir -p "$REPO_DIR/bin"
+	for b in bean-check bean-verify bean-run bean-hook; do
+		cp "$REPO_DIR/rs/target/release/$b" "$REPO_DIR/bin/$b"
+	done
+	echo "  binaries -> $REPO_DIR/bin (bean-check, bean-verify, bean-run, bean-hook)"
+}
 
 install_claude() {
 	mkdir -p "$CLAUDE_DIR/skills"
 	rm -rf "$CLAUDE_DIR/skills/bean"
 	cp -R "$REPO_DIR/skills/bean" "$CLAUDE_DIR/skills/bean"
-	echo "  installed bean -> $CLAUDE_DIR/skills/bean (provides /bean)"
+	echo "  skill -> $CLAUDE_DIR/skills/bean (provides /bean)"
+	# register the native Stop hook (idempotent JSON merge into settings.json)
+	"$REPO_DIR/bin/bean-hook" --register "$CLAUDE_DIR" | sed 's/^/  /'
 }
 
 install_codex() {
@@ -27,13 +48,16 @@ install_codex() {
 		mkdir -p "$CODEX_DIR/skills"
 		rm -rf "$CODEX_DIR/skills/bean"
 		cp -R "$REPO_DIR/skills/bean" "$CODEX_DIR/skills/bean"
-		echo "  installed bean -> $CODEX_DIR/skills/bean"
+		echo "  skill -> $CODEX_DIR/skills/bean"
+		echo "  (Codex: invoke /bean; it calls the bin/ runtime — add $REPO_DIR/bin to PATH"
+		echo "   so 'bean-check'/'bean-run' resolve, or reference them by path.)"
 	else
 		echo "  (Codex config dir $CODEX_DIR not found — skipping Codex install)"
 	fi
 }
 
 echo "Installing bean..."
+build_runtime
 install_claude
 install_codex
-echo "Done. Restart your client, then invoke /bean."
+echo "Done. Restart Claude Code. In a project, run /bean; the Stop hook keeps the loop honest."

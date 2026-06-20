@@ -485,7 +485,7 @@ fn main() {
                             || a.get("inputs_hash").and_then(|v| v.as_str())
                                 != Some(want_inputs.as_str());
                         let verdict = a.get("verdict").and_then(|v| v.as_str()).unwrap_or("");
-                        let mut mk = |code: &str| {
+                        let mk = |code: &str| {
                             let mut blk = b(code, id_of(c));
                             blk.extra
                                 .push(("verifier".into(), Value::String(vname.into())));
