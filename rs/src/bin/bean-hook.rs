@@ -33,14 +33,16 @@ fn bean_check_path() -> PathBuf {
     }
 }
 
-// `bean-hook --register <claude-config-dir>` idempotently merges a Stop hook into
-// <dir>/settings.json pointing at this binary's absolute path (used by install.sh so a
-// clone+install wires the coupling without a marketplace plugin). Robust JSON, no jq.
-fn register(dir: &str) -> ! {
+// `bean-hook --register <config-dir> [file]` idempotently merges a Stop hook into
+// <dir>/<file> (default settings.json) pointing at this binary's absolute path. Used by
+// install.sh so a clone+install wires the coupling for both Claude Code (settings.json) and
+// Codex (hooks.json) — the Stop-hook JSON schema and {"decision":"block"} contract are shared.
+// Robust JSON, no jq.
+fn register(dir: &str, file: &str) -> ! {
     let self_path = std::env::current_exe()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| "bean-hook".into());
-    let settings = Path::new(dir).join("settings.json");
+    let settings = Path::new(dir).join(file);
     let mut root: Value = std::fs::read_to_string(&settings)
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok())
@@ -91,7 +93,11 @@ fn main() {
             eprintln!("bean-hook: --register requires a config dir");
             std::process::exit(3);
         });
-        register(&dir);
+        let file = args
+            .get(2)
+            .cloned()
+            .unwrap_or_else(|| "settings.json".into());
+        register(&dir, &file);
     }
 
     let mut input = String::new();

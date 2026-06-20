@@ -49,8 +49,8 @@ install_codex() {
 		rm -rf "$CODEX_DIR/skills/bean"
 		cp -R "$REPO_DIR/skills/bean" "$CODEX_DIR/skills/bean"
 		echo "  skill -> $CODEX_DIR/skills/bean"
-		echo "  (Codex: invoke /bean; it calls the bin/ runtime — add $REPO_DIR/bin to PATH"
-		echo "   so 'bean-check'/'bean-run' resolve, or reference them by path.)"
+		# Codex's Stop hook uses the SAME contract as Claude's; register into hooks.json
+		"$REPO_DIR/bin/bean-hook" --register "$CODEX_DIR" hooks.json | sed 's/^/  /'
 	else
 		echo "  (Codex config dir $CODEX_DIR not found — skipping Codex install)"
 	fi
