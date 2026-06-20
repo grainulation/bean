@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 2.0.2 — driver "pivot, don't stop" + review hardening
+
+Adds the "pivot, don't stop" driver discipline, then hardens it: a cross-model (Codex) review
+of the change found two HIGH and two MED issues in `bean-run`'s progress accounting, all fixed
+before release with regression coverage (conformance 28/28, `npm test` 24/24):
 
 - **Pivot, don't stop.** The driver's default response to a stalled round is now a **pivot**
   (inject a change-approach directive — different front / supersede a belief / escalate / re-frame
