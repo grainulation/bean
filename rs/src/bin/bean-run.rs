@@ -9,9 +9,11 @@
 // Per round: (1) compile via the sibling bean-check binary, (2) inject the signal + goal +
 // ledger into the agent's prompt (stdin), (3) the agent does real work and emits a JSON array
 // of claims on stdout, which are upserted into the ledger by id. PIVOT, DON'T STOP: a round
-// that leaves the certificate unchanged while still blocked is a PIVOT (inject a change-approach
-// directive and keep going); only after PIVOT_BUDGET consecutive no-progress rounds is it a
-// true "stuck" stop. The only true stops are ready / converged-with-residuals / budget / stuck.
+// that leaves the open-front FRONTIER unchanged while still blocked is a PIVOT (inject a
+// change-approach directive and keep going); only after ALLOWED_PIVOTS consecutive no-progress
+// rounds is it a true "stuck" stop. Exhausting --max-rounds is the hard ceiling (budget-
+// exceeded), not "stuck". The only true stops are ready / converged-with-residuals / budget /
+// stuck.
 //
 // The agent contract is model-agnostic: --agent is a command; the prompt goes on stdin, claims
 // JSON comes back on stdout. Wire "claude -p", "codex exec -", or any script honoring it.
@@ -117,6 +119,32 @@ fn parse_claims(out: &str) -> Vec<Value> {
 
 fn id_of(c: &Value) -> &str {
     c.get("id").and_then(|v| v.as_str()).unwrap_or("")
+}
+
+// progress signal = the open-front FRONTIER (status + the sorted set of blocker code:claim
+// pairs), NOT the certificate. The cert misses blocker-internal changes (discharging one of
+// several blockers leaves it untouched until status flips) and trips on unrelated admitted-
+// claim noise — so it both hides real progress and fakes it. The frontier moves exactly when
+// a front opens or closes, which is the thing the pivot/stuck decision actually cares about.
+fn frontier(sig: &Value) -> String {
+    let status = sig.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    let mut fronts: Vec<String> = sig
+        .get("blockers")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .map(|bl| {
+                    format!(
+                        "{}\u{1f}{}",
+                        bl.get("code").and_then(|v| v.as_str()).unwrap_or(""),
+                        bl.get("claim").and_then(|v| v.as_str()).unwrap_or("")
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    fronts.sort();
+    format!("{status}\u{1e}{}", fronts.join("\u{1d}"))
 }
 fn is_active(c: &Value) -> bool {
     let st = c.get("status").and_then(|v| v.as_str()).unwrap_or("");
@@ -278,11 +306,15 @@ fn main() {
     };
 
     // pivot, don't stop: tolerate this many consecutive no-progress rounds (each one pivots to
-    // a different front/approach) before declaring a true "stuck" stop.
-    const PIVOT_BUDGET: i32 = 2;
+    // a different front/approach) before declaring a true "stuck" stop. ALLOWED_PIVOTS=2 means
+    // two no-progress rounds are turned into pivots; a third with still no progress is "stuck".
+    const ALLOWED_PIVOTS: i32 = 2;
     let mut trace: Vec<Value> = vec![];
-    let mut outcome = String::from("stuck");
-    let mut prev_cert: Option<String> = None;
+    // Natural max-rounds exhaustion is the hard round ceiling (budget-exceeded, exit 2), NOT
+    // "stuck": bean-check runs with --no-state here, so it never emits budget-exceeded itself —
+    // the driver owns the ceiling. "stuck" is reserved for repeated pivots that made no progress.
+    let mut outcome = String::from("budget-exceeded");
+    let mut prev_frontier: Option<String> = None;
     let mut no_progress = 0;
     for round in 1..=max_rounds {
         let mut claims = read_claims(&bean_dir);
@@ -293,6 +325,7 @@ fn main() {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
+        let front = frontier(&sig);
         let has_blockers = sig
             .get("blockers")
             .and_then(|v| v.as_array())
@@ -306,12 +339,16 @@ fn main() {
             break;
         }
         // No progress last round? PIVOT, don't stop: tell the agent to change the front/approach
-        // and keep going. Only after PIVOT_BUDGET consecutive no-progress rounds is it a true
+        // and keep going. Progress is measured by the open-front FRONTIER moving (a blocker
+        // discharged or a new one surfaced), NOT the certificate — the cert ignores blocker-
+        // driving fields (tags, resolved_by, conflicts_with, depends_on) unless status flips,
+        // and resets on unrelated admitted-claim noise, so it both misses real progress and
+        // fakes it. Only after ALLOWED_PIVOTS consecutive no-progress rounds is it a true
         // "stuck" stop — stopping on the first stall is the satisficing failure we guard against.
         let mut pivot = false;
-        if prev_cert.as_deref() == Some(cert.as_str()) && has_blockers {
+        if prev_frontier.as_deref() == Some(front.as_str()) && has_blockers {
             no_progress += 1;
-            if no_progress > PIVOT_BUDGET {
+            if no_progress > ALLOWED_PIVOTS {
                 outcome = String::from("stuck");
                 break;
             }
@@ -319,7 +356,7 @@ fn main() {
         } else {
             no_progress = 0;
         }
-        prev_cert = Some(cert.clone());
+        prev_frontier = Some(front.clone());
         let prompt = render_prompt(&goal, &sig, &claims, pivot);
         let out = Command::new(agent_argv[0])
             .args(&agent_argv[1..])
@@ -337,7 +374,7 @@ fn main() {
         let emitted = parse_claims(&String::from_utf8_lossy(&out.stdout));
         let recorded = upsert(&mut claims, emitted);
         write_claims(&bean_dir, &claims);
-        trace.push(serde_json::json!({ "round": round, "status": status, "certificate": cert, "recorded": recorded }));
+        trace.push(serde_json::json!({ "round": round, "status": status, "certificate": cert, "pivot": pivot, "recorded": recorded }));
         if !json_out {
             eprintln!(
                 "bean-run: round {round} {status} (cert {cert}) — recorded {recorded} claim(s)"

@@ -231,6 +231,13 @@ const DISCHARGE = agentScript(
 const INERT = agentScript(
 	"process.stdin.resume();process.stdin.on('end',()=>process.stdout.write('[]'));",
 );
+// CHURN: every round surfaces a brand-new open risk (the frontier always moves, so it never
+// stalls into "stuck"), yet never converges — must exhaust --max-rounds as budget-exceeded.
+const CHURN = agentScript(
+	"let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{" +
+		"const n=(s.match(/\\bc\\d+\\b/g)||[]).length+1;" +
+		"process.stdout.write(JSON.stringify([{id:'c'+n,type:'risk',topic:'t'+n,content:'open concern '+n,evidence:'documented'}]));});",
+);
 /** @param {string} agent @param {string} claims */
 const drive = (agent, claims) => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bean-drive-"));
@@ -259,29 +266,53 @@ const OPEN_RISK = JSON.stringify([
 		evidence: "documented",
 	},
 ]);
-for (const [name, agent, want, exit, minRounds] of [
-	["driver converges (discharging agent)", DISCHARGE, "ready", 0, 1],
-	// stuck must come AFTER pivots, not on the first stall — assert it pivoted (>=2 rounds)
+// wantPivot: assert the trace actually injected pivot directives before the stop. Without
+// this a "stuck" could pass for the wrong reason — e.g. if pivot injection were removed the
+// run would just exhaust max-rounds. (And with the frontier/budget fix, bare exhaustion now
+// reads as budget-exceeded, not stuck — so a missing-pivot regression flips outcome too.)
+for (const [name, agent, want, exit, minRounds, wantPivot] of [
+	["driver converges (discharging agent)", DISCHARGE, "ready", 0, 1, false],
+	// stuck must come AFTER pivots, not on the first stall — assert the trace shows pivots and
+	// that it reached the stuck stop (not a bare max-rounds exhaustion, which is budget-exceeded)
 	[
 		"driver pivots before a true stuck-stop (inert agent)",
 		INERT,
 		"stuck",
 		5,
 		2,
+		true,
+	],
+	// frontier always moving but never converging -> hard round ceiling, not "stuck"
+	[
+		"driver hits round ceiling as budget-exceeded (churning agent)",
+		CHURN,
+		"budget-exceeded",
+		2,
+		5,
+		false,
 	],
 ]) {
 	const { exit: got, report } = drive(agent, OPEN_RISK);
-	if (report.outcome === want && got === exit && report.rounds >= minRounds) {
+	const pivots = (report.trace || []).filter((t) => t.pivot === true).length;
+	const pivotOk = wantPivot ? pivots >= 1 : true;
+	if (
+		report.outcome === want &&
+		got === exit &&
+		report.rounds >= minRounds &&
+		pivotOk
+	) {
 		dpass++;
-		console.log(`  ok    ${name}`);
+		console.log(
+			`  ok    ${name}${wantPivot ? ` (${pivots} pivot rounds)` : ""}`,
+		);
 	} else {
 		fails.push(name);
 		console.log(
-			`  DIFF  ${name}: got ${report.outcome}/${got}/rounds=${report.rounds}, want ${want}/${exit}/>=${minRounds}`,
+			`  DIFF  ${name}: got ${report.outcome}/${got}/rounds=${report.rounds}/pivots=${pivots}, want ${want}/${exit}/>=${minRounds}${wantPivot ? "/pivots>=1" : ""}`,
 		);
 	}
 }
-console.log(`${dpass}/2 driver smoke checks pass`);
+console.log(`${dpass}/3 driver smoke checks pass`);
 
 // ---- oracle-gate behavior (bean-check 2.0 + bean-verify) ----
 // No JS reference for the gate on this branch, so these are assertion-based behavioral checks.
@@ -469,6 +500,6 @@ console.log(
 );
 
 const total = pass + tpass + dpass + gpass;
-const totalN = fixtures.length + SCENARIOS.length + 2 + GATE_CASES.length + 1;
+const totalN = fixtures.length + SCENARIOS.length + 3 + GATE_CASES.length + 1;
 console.log(`\n${total}/${totalN} conformance + driver + gate checks pass`);
 process.exit(fails.length ? 1 : 0);

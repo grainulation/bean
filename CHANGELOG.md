@@ -7,7 +7,17 @@
   — and keep going), not a stop. A no-progress round only becomes a true `stuck` stop after a
   small pivot budget is spent. The few **true stops** are now explicit: converged (`ready`), a
   hard budget ceiling, and a genuine named residual — everything else is a pivot. (`bean-run`
-  PIVOT_BUDGET; `convergence.md` "pivot, don't stop"; conformance asserts pivots precede a stuck stop.)
+  ALLOWED_PIVOTS; `convergence.md` "pivot, don't stop"; conformance asserts pivots precede a stuck stop.)
+- **Progress is the open-front frontier, not the certificate** (review fix). The driver now
+  measures round-over-round progress by the blocker set moving (a front discharged or surfaced),
+  not by the certificate hash. The cert ignored blocker-internal changes (so discharging one of
+  several blockers looked like no progress) and tripped on unrelated admitted-claim noise (so
+  churn looked like progress) — both could mis-fire the pivot/stuck decision.
+- **Round-ceiling exhaustion reads as `budget-exceeded`, not `stuck`** (review fix). Running out
+  of `--max-rounds` while still making progress is the hard ceiling (exit 2), delivered with open
+  fronts named; `stuck` (exit 5) is reserved for repeated pivots that moved nothing. Conformance
+  adds a churning-agent case (frontier always moves, never converges → `budget-exceeded`) and a
+  strengthened stuck case that asserts pivot directives actually fired before the stop.
 
 ## 2.0.1 — fix-first hardening (independent review)
 
