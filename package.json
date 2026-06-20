@@ -22,7 +22,8 @@
 		"test": "node test/smoke.test.js && node test/bean-check.test.js",
 		"typecheck": "tsc --noEmit",
 		"format": "npx prettier@3.3 --write .",
-		"format:check": "npx prettier@3.3 --check ."
+		"format:check": "npx prettier@3.3 --check .",
+		"verify": "npm run format:check && npm run typecheck && npm test && node -e \"const p=require('./package.json'); if (p.dependencies && Object.keys(p.dependencies).length) { console.error('bean ships zero runtime dependencies'); process.exit(1); } console.log('ok: zero runtime dependencies');\""
 	},
 	"keywords": [
 		"execution-discipline",
