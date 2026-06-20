@@ -6,3 +6,4 @@ review/
 bean-stalk.md
 **/.bean/state.json
 
+rs/target/
