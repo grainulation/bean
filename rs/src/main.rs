@@ -2,13 +2,14 @@
 //
 // Reconverges with the Bran core (already Rust): a single static binary with no install
 // dependency — the portability bean-check.js could not give, since Node is itself a dep.
-// This first bootstrap slice ports the STATIC checks (no temporal state, no oracle gate)
-// and is held to the JS reference by a differential conformance oracle (test/conformance.mjs):
-// JS and Rust must agree on status + blockers + the deterministic certificate for every fixture.
+// Ports the static checks AND the temporal checks (state.json / dry-round / budget); held to
+// the JS reference by a differential conformance oracle (test/conformance.mjs): JS and Rust
+// must agree on status + blockers + certificate + persisted state for every fixture/scenario.
+// Still to come (later slices): the 2.0 oracle gate (verified_by) and the native hooks.
 //
 //   bean-check --dir <path> [--json] [--no-state]
 //
-// Exit: 0 = ready, 1 = blocked, 3 = usage/load error. (budget/temporal land in a later slice.)
+// Exit: 0 = ready, 1 = blocked, 2 = budget-exceeded, 3 = usage/load error.
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
