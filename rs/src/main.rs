@@ -34,9 +34,12 @@ fn tier_rank(t: &str) -> i32 {
         .unwrap_or(-1)
 }
 fn sha_hex(s: &str) -> String {
+    sha_hex_bytes(s.as_bytes())
+}
+fn sha_hex_bytes(b: &[u8]) -> String {
     let mut h = Sha256::new();
-    h.update(s.as_bytes());
-    h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+    h.update(b);
+    h.finalize().iter().map(|x| format!("{:02x}", x)).collect()
 }
 fn die(code: i32, msg: &str) -> ! {
     eprintln!("bean-check: {msg}");
@@ -82,7 +85,37 @@ fn safe_id(id: &str) -> bool {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
 }
-// matches bean-verify's inputs_hash exactly (so a recompute equals what was recorded)
+// matches bean-verify's inputs_hash exactly (so a recompute equals what was recorded).
+// Byte-based (not UTF-8) and RECURSIVE for directories, so a declared `inputs: ["src/"]`
+// actually detects changes inside the directory instead of collapsing to "absent".
+fn hash_path(p: &std::path::Path) -> String {
+    match std::fs::metadata(p) {
+        Ok(m) if m.is_file() => std::fs::read(p)
+            .map(|b| sha_hex_bytes(&b))
+            .unwrap_or_else(|_| "unreadable".into()),
+        Ok(m) if m.is_dir() => {
+            let mut entries: Vec<std::path::PathBuf> = match std::fs::read_dir(p) {
+                Ok(rd) => rd.filter_map(|e| e.ok().map(|e| e.path())).collect(),
+                Err(_) => return "unreadable".into(),
+            };
+            entries.sort();
+            let parts: Vec<String> = entries
+                .iter()
+                .map(|c| {
+                    format!(
+                        "{}:{}",
+                        c.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        hash_path(c)
+                    )
+                })
+                .collect();
+            sha_hex(&parts.join("\n"))
+        }
+        _ => "absent".into(),
+    }
+}
 fn inputs_hash(base: &std::path::Path, inputs: &[Value]) -> String {
     let mut paths: Vec<String> = inputs
         .iter()
@@ -92,17 +125,10 @@ fn inputs_hash(base: &std::path::Path, inputs: &[Value]) -> String {
         return sha_hex("");
     }
     paths.sort();
-    let mut parts = vec![];
-    for rel in &paths {
-        let p = base.join(rel);
-        let h = match std::fs::metadata(&p) {
-            Ok(m) if m.is_file() => std::fs::read_to_string(&p)
-                .map(|c| sha_hex(&c))
-                .unwrap_or_else(|_| "absent".into()),
-            _ => "absent".into(),
-        };
-        parts.push(format!("{rel}:{h}"));
-    }
+    let parts: Vec<String> = paths
+        .iter()
+        .map(|rel| format!("{rel}:{}", hash_path(&base.join(rel))))
+        .collect();
     sha_hex(&parts.join("\n"))
 }
 
@@ -173,7 +199,11 @@ fn main() {
     let mut oracles = serde_json::Map::new();
     let mut sealed_expected = false;
     if let Ok(rt) = std::fs::read_to_string(bean_dir.join("run.json")) {
-        if let Ok(rj) = serde_json::from_str::<Value>(&rt) {
+        // fail closed: an existing-but-invalid run.json must NOT silently fall back to compat
+        // defaults (that would disable the strict gate). Treat it as a load error.
+        let rj = serde_json::from_str::<Value>(&rt)
+            .unwrap_or_else(|e| die(3, &format!("cannot parse run.json: {e}")));
+        {
             if let Some(eb) = rj.get("evidence_bar") {
                 if let Some(v) = eb.get("load_bearing").and_then(|v| v.as_str()) {
                     if TIERS.contains(&v) {
@@ -531,29 +561,31 @@ fn main() {
                             .into(),
                     ],
                 );
-            } else if is_residual {
-                residual_load_bearing.push(id_of(c).into());
-                if let Some(f) = &fail {
-                    let mut w = b("W_ORACLE_RESIDUAL_FALLBACK", id_of(c));
-                    w.extra
-                        .push(("masked".into(), Value::String(f.code.clone())));
-                    warnings.push(w);
-                }
-            } else {
-                let blk = fail.unwrap_or_else(|| {
-                    let mut x = b("E_UNVERIFIED_LOADBEARING", id_of(c));
-                    if let Some(t) = s(c, "topic") {
-                        x.extra.push(("topic".into(), Value::String(t.into())));
-                    }
-                    x
-                });
-                // advisory degrades blocker -> warning preserving the specific code (E_ -> W_)
+            } else if let Some(blk) = fail {
+                // a DECLARED verifier that didn't pass (undeclared / no verdict / stale / failed /
+                // error) BLOCKS and cannot be laundered by a `residual` tag — you asserted it
+                // would be verified. Residual fallback is only for claims with no verifier at all.
                 if mode == "strict" {
                     blockers.push(blk);
                 } else {
                     let mut w = blk.clone();
                     w.code = blk.code.replacen("E_", "W_", 1);
                     warnings.push(w);
+                }
+            } else if is_residual {
+                // no verifier, but a named residual with a reason — converges-with-residuals
+                residual_load_bearing.push(id_of(c).into());
+            } else {
+                // no verifier and no residual
+                let mut blk = b("E_UNVERIFIED_LOADBEARING", id_of(c));
+                if let Some(t) = s(c, "topic") {
+                    blk.extra.push(("topic".into(), Value::String(t.into())));
+                }
+                if mode == "strict" {
+                    blockers.push(blk);
+                } else {
+                    blk.code = "W_UNVERIFIED_LOADBEARING".into();
+                    warnings.push(blk);
                 }
             }
         }
@@ -569,11 +601,62 @@ fn main() {
         }
     }
 
+    // coverage warnings (echo-chamber / type monoculture) — parity with the JS reference.
+    // Ordered by first appearance of each topic among active claims, SINGLE_SOURCE then MONOCULTURE.
+    {
+        let mut order: Vec<String> = vec![];
+        let mut map: std::collections::HashMap<
+            String,
+            (
+                std::collections::HashSet<String>,
+                std::collections::HashSet<String>,
+                usize,
+            ),
+        > = std::collections::HashMap::new();
+        for c in &active {
+            let topic = s(c, "topic").unwrap_or("").to_string();
+            let e = map.entry(topic.clone()).or_insert_with(|| {
+                order.push(topic.clone());
+                (
+                    std::collections::HashSet::new(),
+                    std::collections::HashSet::new(),
+                    0,
+                )
+            });
+            e.0.insert(
+                c.get("source")
+                    .and_then(|v| v.get("origin"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string(),
+            );
+            e.1.insert(s(c, "type").unwrap_or("").to_string());
+            e.2 += 1;
+        }
+        for topic in &order {
+            let (sources, types, n) = &map[topic];
+            if *n >= 3 && sources.len() == 1 {
+                let mut w = b("W_SINGLE_SOURCE", "");
+                w.extra.push(("topic".into(), Value::String(topic.clone())));
+                warnings.push(w);
+            }
+            if *n >= 2 && types.len() < 2 {
+                let mut w = b("W_MONOCULTURE", "");
+                w.extra.push(("topic".into(), Value::String(topic.clone())));
+                warnings.push(w);
+            }
+        }
+    }
+
     // prior state
     let mut prior: Option<Value> = None;
     if state_enabled {
         if let Ok(t) = std::fs::read_to_string(bean_dir.join("state.json")) {
-            prior = serde_json::from_str::<Value>(&t).ok();
+            // fail closed: a corrupt state.json must not silently reset temporal tracking
+            prior = Some(
+                serde_json::from_str::<Value>(&t)
+                    .unwrap_or_else(|e| die(3, &format!("cannot parse state.json: {e}"))),
+            );
         }
     }
     let prior_seen: Vec<String> = prior
@@ -634,7 +717,9 @@ fn main() {
         })
         .collect();
     hash_lines.sort();
-    let claims_hash = sha_hex(&hash_lines.join(""));
+    // JS joins the per-claim lines with \x01 (SOH); fields within a line use \x00 (NUL). Both
+    // delimiters must match the reference or multi-claim claims_hash drifts (single-claim hides it).
+    let claims_hash = sha_hex(&hash_lines.join("\u{1}"));
 
     let dry = prior.is_some() && prior_hash.as_deref() == Some(claims_hash.as_str());
     let round = match prior_round {
@@ -700,15 +785,19 @@ fn main() {
         lb.sort();
         let mut res = residual_load_bearing.clone();
         res.sort();
+        // bind a canonical hash of each oracle SPEC (cmd + declared inputs + any pinned digest),
+        // not just the optional oracle_digest — so changing a registry command/inputs changes the
+        // certificate even in advisory/residual cases where no verdict was admitted.
         let mut orc: Vec<String> = oracles
             .iter()
             .map(|(k, v)| {
-                format!(
-                    "{k}:{}",
-                    v.get("oracle_digest")
-                        .and_then(|x| x.as_str())
-                        .unwrap_or("")
-                )
+                let cmd = serde_json::to_string(v.get("cmd").unwrap_or(&Value::Null)).unwrap();
+                let inps = serde_json::to_string(v.get("inputs").unwrap_or(&Value::Null)).unwrap();
+                let pin = v
+                    .get("oracle_digest")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("");
+                format!("{k}:{}", sha_hex(&format!("{cmd}\u{0}{inps}\u{0}{pin}")))
             })
             .collect();
         orc.sort();
@@ -751,10 +840,11 @@ fn main() {
             "superseded_hashes": superseded,
             "claims_hash": claims_hash,
         });
-        let _ = std::fs::write(
+        std::fs::write(
             bean_dir.join("state.json"),
             serde_json::to_string_pretty(&next).unwrap() + "\n",
-        );
+        )
+        .unwrap_or_else(|e| die(3, &format!("cannot write state.json: {e}")));
     }
 
     if json_out {

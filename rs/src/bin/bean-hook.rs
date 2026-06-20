@@ -23,6 +23,11 @@ fn allow() -> ! {
     // empty stdout + exit 0 = let the agent stop
     std::process::exit(0);
 }
+fn block(reason: &str) -> ! {
+    let d = serde_json::json!({ "decision": "block", "reason": reason });
+    println!("{}", serde_json::to_string(&d).unwrap());
+    std::process::exit(0);
+}
 
 fn bean_check_path() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
@@ -52,17 +57,16 @@ fn register(dir: &str, file: &str) -> ! {
     if !root.is_object() {
         root = serde_json::json!({});
     }
-    let hooks = root
-        .as_object_mut()
-        .unwrap()
-        .entry("hooks")
-        .or_insert(serde_json::json!({}));
-    let stop = hooks
-        .as_object_mut()
-        .unwrap()
-        .entry("Stop")
-        .or_insert(serde_json::json!([]));
-    let arr = stop.as_array_mut().unwrap();
+    // coerce malformed existing shapes instead of panicking: hooks must be an object, Stop an array
+    let rootobj = root.as_object_mut().unwrap();
+    if !rootobj.get("hooks").map(|v| v.is_object()).unwrap_or(false) {
+        rootobj.insert("hooks".into(), serde_json::json!({}));
+    }
+    let hooks = rootobj.get_mut("hooks").unwrap().as_object_mut().unwrap();
+    if !hooks.get("Stop").map(|v| v.is_array()).unwrap_or(false) {
+        hooks.insert("Stop".into(), serde_json::json!([]));
+    }
+    let arr = hooks.get_mut("Stop").unwrap().as_array_mut().unwrap();
     // dedup: don't add if our command is already registered anywhere under Stop
     let already = arr.iter().any(|grp| {
         grp.get("hooks")
@@ -127,24 +131,27 @@ fn main() {
         allow();
     }
 
-    // adjudicate the ledger
+    // adjudicate the ledger. FAIL CLOSED: for a project that IS using bean, a checker that
+    // can't run / returns no JSON / returns an unknown status must BLOCK, not silently allow
+    // the stop (the loop guard prevents an infinite block). Only the explicit terminal states
+    // ready / converged-with-residuals / budget-exceeded allow the stop.
     let out = match Command::new(bean_check_path())
         .args(["--dir", &proj, "--json", "--no-state"])
         .output()
     {
-        Ok(o) => o,
-        Err(_) => allow(), // can't run the check -> never block the user's stop
+        Ok(o) if o.status.success() || o.status.code().is_some() => o,
+        _ => block("bean-check could not be run; refusing to allow stop on an active bean ledger (fix the runtime)"),
     };
-    let result: Value = serde_json::from_slice(&out.stdout).unwrap_or(Value::Null);
-    let status = result
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("ready");
-
-    // only "blocked" keeps the agent going. ready / converged-with-residuals / budget-exceeded
-    // are all terminal stop states (deliver).
-    if status != "blocked" {
-        allow();
+    let result: Value = match serde_json::from_slice(&out.stdout) {
+        Ok(v) => v,
+        Err(_) => {
+            block("bean-check returned no parseable result; refusing to allow stop (fail closed)")
+        }
+    };
+    match result.get("status").and_then(|v| v.as_str()) {
+        Some("ready") | Some("converged-with-residuals") | Some("budget-exceeded") => allow(),
+        Some("blocked") => {} // fall through to build the block reason
+        _ => block("bean-check returned no/unknown status; refusing to allow stop (fail closed)"),
     }
 
     // build the reason: the open fronts the agent must drive before it may stop

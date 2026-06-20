@@ -14,7 +14,7 @@
 // The agent contract is model-agnostic: --agent is a command; the prompt goes on stdin, claims
 // JSON comes back on stdout. Wire "claude -p", "codex exec -", or any script honoring it.
 //
-// Exit: 0 = converged (ready), 2 = budget-exceeded, 5 = stuck, 3 = usage/load error.
+// Exit: 0 = ready, 4 = converged-with-residuals, 2 = budget-exceeded, 5 = stuck, 3 = usage/load.
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -268,7 +268,7 @@ fn main() {
     };
 
     let mut trace: Vec<Value> = vec![];
-    let mut outcome = "stuck";
+    let mut outcome = String::from("stuck");
     let mut prev_cert: Option<String> = None;
     for round in 1..=max_rounds {
         let mut claims = read_claims(&bean_dir);
@@ -284,16 +284,15 @@ fn main() {
             .and_then(|v| v.as_array())
             .map(|a| !a.is_empty())
             .unwrap_or(false);
-        if status == "ready" {
-            outcome = "ready";
-            break;
-        }
-        if status == "budget-exceeded" {
-            outcome = "budget-exceeded";
+        // terminal states — stop driving. converged-with-residuals is converged (just not
+        // clean), so it must end the loop rather than spin to "stuck".
+        if status == "ready" || status == "converged-with-residuals" || status == "budget-exceeded"
+        {
+            outcome = status.to_string();
             break;
         }
         if prev_cert.as_deref() == Some(cert.as_str()) && has_blockers {
-            outcome = "stuck";
+            outcome = String::from("stuck");
             break;
         }
         prev_cert = Some(cert.clone());
@@ -347,8 +346,9 @@ fn main() {
                 .unwrap_or("")
         );
     }
-    exit(match outcome {
+    exit(match outcome.as_str() {
         "ready" => 0,
+        "converged-with-residuals" => 4,
         "budget-exceeded" => 2,
         "stuck" => 5,
         _ => 1,

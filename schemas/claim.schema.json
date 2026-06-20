@@ -41,6 +41,12 @@
 			"type": "array",
 			"items": { "type": "string" },
 			"description": "Convention: load-bearing | needs-input | unknown | confirmed-non-issue | residual | accepted"
+		},
+		"verified_by": {
+			"type": "object",
+			"required": ["verifier"],
+			"description": "2.0: points this load-bearing claim at a registered oracle (run.json oracles). bean-check reads the recorded verdict in .bean/verdicts/<id>.<verifier>.json; in strict mode the claim converges only if that verdict is declared, fresh (claim_binding matches), and pass.",
+			"properties": { "verifier": { "type": "string", "minLength": 1 } }
 		}
 	}
 }

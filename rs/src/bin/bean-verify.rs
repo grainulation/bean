@@ -21,9 +21,12 @@ use std::path::Path;
 use std::process::{exit, Command, Stdio};
 
 fn sha_hex(s: &str) -> String {
+    sha_hex_bytes(s.as_bytes())
+}
+fn sha_hex_bytes(b: &[u8]) -> String {
     let mut h = Sha256::new();
-    h.update(s.as_bytes());
-    h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
+    h.update(b);
+    h.finalize().iter().map(|x| format!("{:02x}", x)).collect()
 }
 // contentHash MUST match bean-check exactly (claim_binding is compared against it).
 fn content_hash(c: &Value) -> String {
@@ -52,7 +55,36 @@ fn safe_id(id: &str) -> bool {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
 }
-// hash a declared input set (explicit file paths). MUST match bean-check's inputs_hash.
+// hash a declared input set. MUST match bean-check's inputs_hash exactly (byte-based,
+// recursive for directories).
+fn hash_path(p: &Path) -> String {
+    match std::fs::metadata(p) {
+        Ok(m) if m.is_file() => std::fs::read(p)
+            .map(|b| sha_hex_bytes(&b))
+            .unwrap_or_else(|_| "unreadable".into()),
+        Ok(m) if m.is_dir() => {
+            let mut entries: Vec<std::path::PathBuf> = match std::fs::read_dir(p) {
+                Ok(rd) => rd.filter_map(|e| e.ok().map(|e| e.path())).collect(),
+                Err(_) => return "unreadable".into(),
+            };
+            entries.sort();
+            let parts: Vec<String> = entries
+                .iter()
+                .map(|c| {
+                    format!(
+                        "{}:{}",
+                        c.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        hash_path(c)
+                    )
+                })
+                .collect();
+            sha_hex(&parts.join("\n"))
+        }
+        _ => "absent".into(),
+    }
+}
 fn inputs_hash(base: &Path, inputs: &[Value]) -> String {
     let mut paths: Vec<String> = inputs
         .iter()
@@ -62,17 +94,10 @@ fn inputs_hash(base: &Path, inputs: &[Value]) -> String {
         return sha_hex("");
     }
     paths.sort();
-    let mut parts = vec![];
-    for rel in &paths {
-        let p = base.join(rel);
-        let h = match std::fs::metadata(&p) {
-            Ok(m) if m.is_file() => std::fs::read_to_string(&p)
-                .map(|c| sha_hex(&c))
-                .unwrap_or_else(|_| "absent".into()),
-            _ => "absent".into(),
-        };
-        parts.push(format!("{rel}:{h}"));
-    }
+    let parts: Vec<String> = paths
+        .iter()
+        .map(|rel| format!("{rel}:{}", hash_path(&base.join(rel))))
+        .collect();
     sha_hex(&parts.join("\n"))
 }
 
@@ -212,12 +237,17 @@ fn main() {
         }
         Err(e) => ("error".to_string(), None, String::new(), e.to_string()),
     };
-    // a JSON {verdict} on stdout refines the exit-code reading
-    let verdict = serde_json::from_str::<Value>(stdout.trim())
+    // a JSON {verdict} on stdout may only DOWNGRADE or explain — it can NEVER upgrade a
+    // nonzero exit (a failing oracle) into a pass. Exit code is authoritative for "did it fail".
+    let json_verdict = serde_json::from_str::<Value>(stdout.trim())
         .ok()
         .and_then(|j| j.get("verdict").and_then(|v| v.as_str()).map(String::from))
-        .filter(|v| v == "pass" || v == "fail" || v == "error")
-        .unwrap_or(verdict);
+        .filter(|v| v == "pass" || v == "fail" || v == "error");
+    let verdict = match json_verdict {
+        // honor a JSON verdict only when it doesn't upgrade a non-pass exit to "pass"
+        Some(jv) if !(jv == "pass" && verdict != "pass") => jv,
+        _ => verdict,
+    };
 
     let inputs = oracle
         .get("inputs")

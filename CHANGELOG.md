@@ -1,6 +1,36 @@
 # Changelog
 
-## 2.0.0 — unreleased (Rust runtime)
+## 2.0.1 — fix-first hardening (independent review)
+
+A cross-model (Codex) review of the shipped 2.0 runtime found several **fail-open** bugs (the
+worst kind in a gate) and conformance gaps. All fixed, with regression coverage:
+
+- **Fail closed, not open.** The Stop hook (`bean-hook`) now BLOCKS on an active `.bean` ledger
+  if `bean-check` can't run / returns no JSON / returns an unknown status (was: allow stop).
+  An existing-but-invalid `run.json` or `state.json` now errors (exit 3) instead of silently
+  reverting to compat / resetting temporal state.
+- **A residual can't launder a failing oracle.** A claim that declares a verifier which then
+  fails/staled/errored now BLOCKS regardless of a `residual` tag; residual fallback applies
+  only when no verifier is declared at all.
+- **`bean-verify`: a nonzero exit can't be upgraded to `pass`** by a `{"verdict":"pass"}` on
+  stdout (JSON may only downgrade/explain).
+- **Real freshness for directory inputs.** `inputs_hash` is now byte-based and recurses into
+  declared directories (a `inputs: ["src/"]` previously collapsed to "absent", so changes were
+  never detected). Identical in `bean-check` and `bean-verify`.
+- **`bean-run` treats `converged-with-residuals` (exit 4) as terminal** instead of looping to
+  stuck.
+- **Conformance parity restored & widened.** Rust now emits the coverage warnings
+  (`W_SINGLE_SOURCE`/`W_MONOCULTURE`) it had dropped; the multi-claim `claims_hash` delimiter
+  now matches the reference (`\x01` line join — single-claim tests had hidden the drift). The
+  differential now compares warnings, with new multi-claim temporal and residual+failing-oracle
+  cases (27 conformance + driver + gate checks).
+- **Polish:** certificate binds a canonical hash of each oracle spec (cmd+inputs); schemas carry
+  the 2.0 fields (`verification`/`oracles`/`verified_by`); `SECURITY.md` describes the real
+  execution surface (incl. `bean-run`'s `--agent` command); the release workflow smoke-tests each
+  built binary before upload; the marketplace Stop hook degrades gracefully via a shim when no
+  binary is present.
+
+## 2.0.0 — Rust runtime
 
 bean 2.0 reimplements the runtime as a **single Rust static binary** (no install dependency —
 Node was itself the dependency that undercut "runs anywhere"), reconverging with the Bran core,

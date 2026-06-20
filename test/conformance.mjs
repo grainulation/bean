@@ -38,10 +38,11 @@ const run = (bin, argv) => {
 	const r = spawnSync(bin, argv, { encoding: "utf8" });
 	return JSON.parse(r.stdout);
 };
-/** @param {{status:string,blockers:{code:string}[],certificate:string}} r */
+/** @param {{status:string,blockers:{code:string}[],warnings?:{code:string}[],certificate:string}} r */
 const shape = (r) => ({
 	status: r.status,
 	codes: r.blockers.map((b) => b.code).sort(),
+	warns: (r.warnings || []).map((w) => w.code).sort(),
 	cert: r.certificate,
 });
 
@@ -62,6 +63,7 @@ for (const f of fixtures) {
 	const ok =
 		ref.status === got.status &&
 		JSON.stringify(ref.codes) === JSON.stringify(got.codes) &&
+		JSON.stringify(ref.warns) === JSON.stringify(got.warns) &&
 		ref.cert === got.cert;
 	if (ok) {
 		pass++;
@@ -158,6 +160,29 @@ const SCENARIOS = [
 					type: "risk",
 					topic: "t",
 					content: "x",
+					evidence: "documented",
+				},
+			],
+		},
+		times: 2,
+	},
+	{
+		// multi-claim: catches claims_hash delimiter drift (single-claim hides the line join)
+		name: "dry-round-converged (multi-claim)",
+		files: {
+			"claims.json": [
+				{
+					id: "a1",
+					type: "factual",
+					topic: "t",
+					content: "one",
+					evidence: "tested",
+				},
+				{
+					id: "b2",
+					type: "factual",
+					topic: "u",
+					content: "two",
 					evidence: "documented",
 				},
 			],
@@ -339,6 +364,25 @@ const GATE_CASES = [
 			"run.json": { verification: { mode: "strict" } },
 		},
 		want: { status: "converged-with-residuals", exit: 4 },
+	},
+	{
+		// a residual tag must NOT launder a FAILING declared verifier — it still blocks
+		name: "strict: residual + failing verifier -> E_ORACLE_FAILED (1), not masked",
+		files: {
+			"claims.json": [
+				lb("c1", {
+					verified_by: { verifier: "unit" },
+					tags: ["load-bearing", "residual"],
+					content: "c1 with a residual reason stated",
+				}),
+			],
+			"run.json": {
+				verification: { mode: "strict" },
+				oracles: { unit: { cmd: FAIL_CMD } },
+			},
+		},
+		verify: [{ claim: "c1", verifier: "unit" }],
+		want: { status: "blocked", exit: 1, code: "E_ORACLE_FAILED" },
 	},
 	{
 		name: "advisory: no verifier -> ready (0) + W_UNVERIFIED_LOADBEARING",

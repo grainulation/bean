@@ -33,6 +33,18 @@ jobs:
           targets: ${{ matrix.target }}
       - name: Build (release)
         run: cargo build --release --target ${{ matrix.target }} --manifest-path rs/Cargo.toml
+      - name: Smoke the built binaries
+        # only run native binaries (cross-built targets can't execute on this host)
+        if: ${{ !(matrix.os == 'macos-latest' && matrix.target == 'x86_64-apple-darwin') }}
+        run: |
+          set -eu
+          out="rs/target/${{ matrix.target }}/release"
+          "$out/bean-check" --help >/dev/null
+          "$out/bean-check" --dir test/fixtures/converged --no-state >/dev/null   # exit 0 ready
+          if "$out/bean-check" --dir test/fixtures/open-risk --no-state; then
+            echo "expected blocked exit"; exit 1
+          fi
+          echo "smoke ok for ${{ matrix.target }}"
       - name: Package
         run: |
           set -eu
