@@ -259,18 +259,25 @@ const OPEN_RISK = JSON.stringify([
 		evidence: "documented",
 	},
 ]);
-for (const [name, agent, want, exit] of [
-	["driver converges (discharging agent)", DISCHARGE, "ready", 0],
-	["driver stops stuck (inert agent)", INERT, "stuck", 5],
+for (const [name, agent, want, exit, minRounds] of [
+	["driver converges (discharging agent)", DISCHARGE, "ready", 0, 1],
+	// stuck must come AFTER pivots, not on the first stall — assert it pivoted (>=2 rounds)
+	[
+		"driver pivots before a true stuck-stop (inert agent)",
+		INERT,
+		"stuck",
+		5,
+		2,
+	],
 ]) {
 	const { exit: got, report } = drive(agent, OPEN_RISK);
-	if (report.outcome === want && got === exit) {
+	if (report.outcome === want && got === exit && report.rounds >= minRounds) {
 		dpass++;
 		console.log(`  ok    ${name}`);
 	} else {
 		fails.push(name);
 		console.log(
-			`  DIFF  ${name}: got ${report.outcome}/${got}, want ${want}/${exit}`,
+			`  DIFF  ${name}: got ${report.outcome}/${got}/rounds=${report.rounds}, want ${want}/${exit}/>=${minRounds}`,
 		);
 	}
 }

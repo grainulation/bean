@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Pivot, don't stop.** The driver's default response to a stalled round is now a **pivot**
+  (inject a change-approach directive — different front / supersede a belief / escalate / re-frame
+  — and keep going), not a stop. A no-progress round only becomes a true `stuck` stop after a
+  small pivot budget is spent. The few **true stops** are now explicit: converged (`ready`), a
+  hard budget ceiling, and a genuine named residual — everything else is a pivot. (`bean-run`
+  PIVOT_BUDGET; `convergence.md` "pivot, don't stop"; conformance asserts pivots precede a stuck stop.)
+
 ## 2.0.1 — fix-first hardening (independent review)
 
 A cross-model (Codex) review of the shipped 2.0 runtime found several **fail-open** bugs (the

@@ -106,6 +106,29 @@ keep it honest:
   silently become the new goal. Drifting off the goal to chase little detours is its own
   failure (goal-drift), the inverse of satisficing and just as costly.
 
+## Pivot, don't stop — there are only a few true stops
+
+The default response to a wall is a **pivot**, not a stop. A front stalls, a check fails, a
+round adds nothing — none of those is a reason to stop; they are reasons to _change the move_:
+attack a different open front, try a different approach, supersede a belief, escalate the
+effort, or re-frame. Stopping at the first stall is the satisficing failure this whole
+discipline guards against.
+
+There are only a few **true stops** — everything else is a pivot:
+
+1. **Converged** — no unresolved conflicts, the evidence bar (or an oracle) is met, and a dry
+   round added nothing. The answer is done.
+2. **Hard ceiling** — the round/token budget is exhausted. A forced stop: deliver what you
+   have with the open fronts named, never relabelled as "done".
+3. **Genuine residual** — a front you truly cannot reach from here (a credential, an access, an
+   irreducible human decision), named with its reason. Rare, and pressure-tested: only after
+   pivots have failed, never as a first off-ramp.
+
+A "stuck" stop (no progress) is legitimate **only after repeated pivots have failed**, not on
+the first no-progress round. (The `bean-run` driver encodes this: a stalled round pivots —
+injecting a change-approach directive — and only becomes a stuck stop once the pivot budget is
+spent.)
+
 ## Knowing when to stop
 
 bean is **converged** when all three hold:

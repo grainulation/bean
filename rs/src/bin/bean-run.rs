@@ -8,8 +8,10 @@
 //
 // Per round: (1) compile via the sibling bean-check binary, (2) inject the signal + goal +
 // ledger into the agent's prompt (stdin), (3) the agent does real work and emits a JSON array
-// of claims on stdout, which are upserted into the ledger by id. LINEAR PROGRESS: a round that
-// leaves the certificate unchanged while still blocked is STUCK — stop, don't spin.
+// of claims on stdout, which are upserted into the ledger by id. PIVOT, DON'T STOP: a round
+// that leaves the certificate unchanged while still blocked is a PIVOT (inject a change-approach
+// directive and keep going); only after PIVOT_BUDGET consecutive no-progress rounds is it a
+// true "stuck" stop. The only true stops are ready / converged-with-residuals / budget / stuck.
 //
 // The agent contract is model-agnostic: --agent is a command; the prompt goes on stdin, claims
 // JSON comes back on stdout. Wire "claude -p", "codex exec -", or any script honoring it.
@@ -145,7 +147,14 @@ fn upsert(ledger: &mut Vec<Value>, emitted: Vec<Value>) -> usize {
     changed
 }
 
-fn render_prompt(goal: &str, sig: &Value, claims: &[Value]) -> String {
+fn render_prompt(goal: &str, sig: &Value, claims: &[Value], pivot: bool) -> String {
+    let pivot_directive = if pivot {
+        "\n\nPIVOT: the last round made NO progress on the current front. Do NOT repeat the same \
+move. Change the approach — attack a DIFFERENT open front, supersede a belief, escalate effort, \
+or re-frame. Only if every front is genuinely unreachable from here, name them as residuals."
+    } else {
+        ""
+    };
     let active: Vec<&Value> = claims.iter().filter(|c| is_active(c)).collect();
     let ledger = if active.is_empty() {
         "  (empty)".to_string()
@@ -194,7 +203,7 @@ fn render_prompt(goal: &str, sig: &Value, claims: &[Value]) -> String {
         "You are one round of a bean convergence loop. The runtime compiled the ledger; act on \
 THIS signal — drive the most decisive open front, do not restate the plan.\n\nGOAL: {goal}\n\n\
 COMPILER SIGNAL: status={}, certificate={}\nOPEN BLOCKERS (drive one to a terminal state):\n{}\n\n\
-LEDGER (active claims):\n{}\n\nDo the real work to drive the top blocker, then emit ONLY a JSON \
+LEDGER (active claims):\n{}{}\n\nDo the real work to drive the top blocker, then emit ONLY a JSON \
 array of claim objects recording what you established (new claims or upserts by id). Emit [] if \
 nothing changed. The JSON array must be the LAST thing you print, on its own.",
         sig.get("status").and_then(|v| v.as_str()).unwrap_or(""),
@@ -203,6 +212,7 @@ nothing changed. The JSON array must be the LAST thing you print, on its own.",
             .unwrap_or(""),
         blk,
         ledger,
+        pivot_directive,
     )
 }
 
@@ -267,9 +277,13 @@ fn main() {
             .unwrap_or_else(|_| die(3, "bean-check did not return JSON"))
     };
 
+    // pivot, don't stop: tolerate this many consecutive no-progress rounds (each one pivots to
+    // a different front/approach) before declaring a true "stuck" stop.
+    const PIVOT_BUDGET: i32 = 2;
     let mut trace: Vec<Value> = vec![];
     let mut outcome = String::from("stuck");
     let mut prev_cert: Option<String> = None;
+    let mut no_progress = 0;
     for round in 1..=max_rounds {
         let mut claims = read_claims(&bean_dir);
         let sig = compile();
@@ -284,19 +298,29 @@ fn main() {
             .and_then(|v| v.as_array())
             .map(|a| !a.is_empty())
             .unwrap_or(false);
-        // terminal states — stop driving. converged-with-residuals is converged (just not
-        // clean), so it must end the loop rather than spin to "stuck".
+        // TRUE STOPS — the only states that end the loop: converged (ready), a genuine residual
+        // (converged-with-residuals), or the hard budget ceiling. Everything else is a pivot.
         if status == "ready" || status == "converged-with-residuals" || status == "budget-exceeded"
         {
             outcome = status.to_string();
             break;
         }
+        // No progress last round? PIVOT, don't stop: tell the agent to change the front/approach
+        // and keep going. Only after PIVOT_BUDGET consecutive no-progress rounds is it a true
+        // "stuck" stop — stopping on the first stall is the satisficing failure we guard against.
+        let mut pivot = false;
         if prev_cert.as_deref() == Some(cert.as_str()) && has_blockers {
-            outcome = String::from("stuck");
-            break;
+            no_progress += 1;
+            if no_progress > PIVOT_BUDGET {
+                outcome = String::from("stuck");
+                break;
+            }
+            pivot = true;
+        } else {
+            no_progress = 0;
         }
         prev_cert = Some(cert.clone());
-        let prompt = render_prompt(&goal, &sig, &claims);
+        let prompt = render_prompt(&goal, &sig, &claims, pivot);
         let out = Command::new(agent_argv[0])
             .args(&agent_argv[1..])
             .current_dir(&dir)
