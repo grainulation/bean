@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.0.0 — unreleased (Rust runtime)
+
+bean 2.0 reimplements the runtime as a **single Rust static binary** (no install dependency —
+Node was itself the dependency that undercut "runs anywhere"), reconverging with the Bran core,
+and **couples it to execution natively** in both Claude Code and Codex via their Stop hooks. The
+JS line is preserved on the `js-reference` branch as the behavior spec; it is not shipped.
+
+### The runtime (`rs/`, four binaries)
+
+- **`bean-check`** — the compiler: static checks, temporal checks (state/dry-round/budget), and
+  the 2.0 **oracle gate** (verification mode `compat`/`advisory`/`strict`, `verified_by`,
+  recorded verdicts, `converged-with-residuals` exit 4). Certificate is byte-identical to the JS
+  reference when no 2.0 field is present, and binds the full regime when the gate is active.
+- **`bean-verify`** — the only execution path for oracles: runs a declared command (argv, no
+  shell, claim JSON on stdin) and writes a scrubbed verdict; `bean-check` adjudicates it.
+- **`bean-run`** — the driver: per round it injects the compiler signal into the agent's prompt,
+  records emitted claims, and enforces linear progress (stuck detection). Model-agnostic
+  `--agent` command.
+- **`bean-hook`** — the native Stop hook for Claude Code and Codex (shared contract): blocks the
+  agent from finishing a bean-tracked task until the loop converges; inert when no `.bean/`
+  ledger exists; honors the loop guard. `--register` wires it into settings.json / hooks.json.
+
+### Bootstrap mechanic + tests
+
+The JS `bean-check` is the independent reference; the Rust port is held to it by a **differential
+conformance oracle** (`test/conformance.mjs`): 14 differential checks (static + temporal,
+certificates byte-identical) + 2 driver-smoke + 8 oracle-gate behavioral = **24/24**, run in CI
+alongside the Node tests.
+
+### Install
+
+`./install.sh` builds the binaries and registers the native Stop hook for both clients — "install,
+then it just works." Requires Rust; the shipped binary has no runtime dependency.
+
 ## 1.2.0 — 2026-06-19
 
 The "not quite there" release. The core failure was _satisficing_: the loop under-delivered

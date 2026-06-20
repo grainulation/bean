@@ -1,6 +1,8 @@
-// bean-hook — the native Claude Code Stop-hook (bean 2.0 coupling).
+// bean-hook — the native Stop-hook for Claude Code AND Codex (bean 2.0 coupling).
 //
-// Wired via hooks/hooks.json on the "Stop" event. When the agent tries to finish, this runs
+// Both clients share the Stop-hook contract (stdin JSON with cwd/stop_hook_active; block via
+// {"decision":"block","reason":...} on stdout), so one binary serves both. Wired via
+// hooks/hooks.json (Claude) / ~/.codex/hooks.json (Codex). When the agent tries to finish, this runs
 // bean-check on the project's ledger; if the loop has NOT converged it blocks the stop and
 // feeds the compiler signal back as the reason, so the agent keeps driving — the runtime
 // coupled to execution, natively, no wrapper.
