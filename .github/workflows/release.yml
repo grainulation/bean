@@ -1,0 +1,68 @@
+name: release
+
+# Cut a release by pushing a tag: git tag v2.0.0 && git push origin v2.0.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  # Build the runtime on a NATIVE runner per platform (no cross-compilation), package the four
+  # binaries into a per-target tarball, and upload as a workflow artifact.
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build (release)
+        run: cargo build --release --manifest-path rs/Cargo.toml
+      - name: Package
+        run: |
+          set -eu
+          dir="bean-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir -p "$dir"
+          cp rs/target/release/bean-check rs/target/release/bean-verify \
+             rs/target/release/bean-run rs/target/release/bean-hook "$dir"/
+          cp README.md LICENSE "$dir"/ 2>/dev/null || true
+          tar -czf "$dir.tar.gz" "$dir"
+          shasum -a 256 "$dir.tar.gz" > "$dir.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            bean-*.tar.gz
+            bean-*.tar.gz.sha256
+
+  # Gather all platform tarballs and publish the GitHub release.
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            bean ${{ github.ref_name }} — Rust runtime (gate + verify + driver + native Stop hook).
+
+            Prebuilt binaries per platform are attached. Or build from source:
+            `git clone … && ./install.sh` (requires Rust; the binary itself has no runtime deps).
