@@ -17,12 +17,12 @@ writes (a SQL change-log — exactly what the grader evaluates), with **no answe
 
 The improved oracle's verdict tracked the objective grader on every case:
 
-| task / state        | task verb           | naive oracle | improved oracle | grader   |
-| ------------------- | ------------------- | ------------ | --------------- | -------- |
-| buy-wishlist (wrong)| buy everything …    | **pass** ✗   | **fail**        | FAIL 6/7 |
-| buy-wishlist (didn't persist) | buy everything … | pass ✗ | **fail**        | FAIL 1/7 |
-| buy-organizers (didn't persist) | buy 2 …    | **pass** ✗   | **fail**        | FAIL 1/9 |
-| move-to-wishlist (correct) | move all … to …| pass         | **pass**        | PASS 6/6 |
+| task / state                    | task verb        | naive oracle | improved oracle | grader   |
+| ------------------------------- | ---------------- | ------------ | --------------- | -------- |
+| buy-wishlist (wrong)            | buy everything … | **pass** ✗   | **fail**        | FAIL 6/7 |
+| buy-wishlist (didn't persist)   | buy everything … | pass ✗       | **fail**        | FAIL 1/7 |
+| buy-organizers (didn't persist) | buy 2 …          | **pass** ✗   | **fail**        | FAIL 1/9 |
+| move-to-wishlist (correct)      | move all … to …  | pass         | **pass**        | PASS 6/6 |
 
 The naive oracle passed three wrong answers; the improved oracle caught all three and still
 passed the correct one (4/4 agreement with the grader, no answer key).
