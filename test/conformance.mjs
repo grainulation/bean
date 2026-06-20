@@ -187,7 +187,71 @@ console.log(
 	`${tpass}/${SCENARIOS.length} temporal scenarios match the reference`,
 );
 
-const total = pass + tpass;
-const totalN = fixtures.length + SCENARIOS.length;
-console.log(`\n${total}/${totalN} conformance checks match`);
+// ---- driver smoke (bean-run): the coupling works, behaviorally ----
+// Not a differential (the JS driver lives on js-reference); a behavioral check that the Rust
+// driver drives an agent to convergence on the injected signal, and stops STUCK on no progress.
+const RUN = path.join(root, "rs", "target", "release", "bean-run");
+const agentScript = (body) => {
+	const p = path.join(
+		fs.mkdtempSync(path.join(os.tmpdir(), "bean-agent-")),
+		"a.js",
+	);
+	fs.writeFileSync(p, body);
+	return `${process.execPath} ${p}`;
+};
+const DISCHARGE = agentScript(
+	"let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const a=/E_OPEN_RISK r1/.test(s);" +
+		"process.stdout.write(a?JSON.stringify([{id:'r1',type:'risk',topic:'t',content:'residual: unreachable from here, named',evidence:'documented',tags:['residual']}]):'[]');});",
+);
+const INERT = agentScript(
+	"process.stdin.resume();process.stdin.on('end',()=>process.stdout.write('[]'));",
+);
+/** @param {string} agent @param {string} claims */
+const drive = (agent, claims) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bean-drive-"));
+	fs.mkdirSync(path.join(dir, ".bean"));
+	fs.writeFileSync(path.join(dir, ".bean", "claims.json"), claims);
+	fs.writeFileSync(
+		path.join(dir, ".bean", "run.json"),
+		JSON.stringify({ goal: "x" }),
+	);
+	const r = spawnSync(
+		RUN,
+		["--dir", dir, "--agent", agent, "--max-rounds", "5", "--json"],
+		{
+			encoding: "utf8",
+		},
+	);
+	return { exit: r.status, report: JSON.parse(r.stdout) };
+};
+let dpass = 0;
+const OPEN_RISK = JSON.stringify([
+	{
+		id: "r1",
+		type: "risk",
+		topic: "t",
+		content: "a concern",
+		evidence: "documented",
+	},
+]);
+for (const [name, agent, want, exit] of [
+	["driver converges (discharging agent)", DISCHARGE, "ready", 0],
+	["driver stops stuck (inert agent)", INERT, "stuck", 5],
+]) {
+	const { exit: got, report } = drive(agent, OPEN_RISK);
+	if (report.outcome === want && got === exit) {
+		dpass++;
+		console.log(`  ok    ${name}`);
+	} else {
+		fails.push(name);
+		console.log(
+			`  DIFF  ${name}: got ${report.outcome}/${got}, want ${want}/${exit}`,
+		);
+	}
+}
+console.log(`${dpass}/2 driver smoke checks pass`);
+
+const total = pass + tpass + dpass;
+const totalN = fixtures.length + SCENARIOS.length + 2;
+console.log(`\n${total}/${totalN} conformance + driver checks pass`);
 process.exit(fails.length ? 1 : 0);
