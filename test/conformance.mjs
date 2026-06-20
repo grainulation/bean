@@ -73,5 +73,121 @@ for (const f of fixtures) {
 		console.log(`        rs : ${JSON.stringify(got)}`);
 	}
 }
-console.log(`\n${pass}/${fixtures.length} fixtures match the reference`);
+console.log(`\n${pass}/${fixtures.length} static fixtures match the reference`);
+
+// ---- temporal conformance (stateful: state.json / dry-round / budget) ----
+// Each engine runs in its OWN dir so they never read each other's state.json. We run the
+// scenario N times and compare the final result + the persisted state, parsed.
+import os from "node:os";
+/** @param {string} bin @param {string[]} pre @param {Record<string,unknown>} files @param {number} times */
+const stateful = (pre, files, times) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bean-conf-"));
+	fs.mkdirSync(path.join(dir, ".bean"));
+	for (const [n, body] of Object.entries(files))
+		fs.writeFileSync(path.join(dir, ".bean", n), JSON.stringify(body, null, 2));
+	let last;
+	for (let k = 0; k < times; k++) {
+		const r = spawnSync(pre[0], [...pre.slice(1), "--dir", dir, "--json"], {
+			encoding: "utf8",
+		});
+		last = { result: JSON.parse(r.stdout), exit: r.status };
+	}
+	const st = JSON.parse(
+		fs.readFileSync(path.join(dir, ".bean", "state.json"), "utf8"),
+	);
+	return { ...last, state: st };
+};
+/** @param {{result:any,exit:number,state:any}} o */
+const tshape = (o) => ({
+	status: o.result.status,
+	round: o.result.round,
+	dry: o.result.dry,
+	notes: [...o.result.notes].sort(),
+	cert: o.result.certificate,
+	exit: o.exit,
+	st_round: o.state.round,
+	st_hash: o.state.claims_hash,
+	st_seen: [...o.state.seen_ids].sort(),
+	st_sup: [...o.state.superseded_hashes].sort(),
+});
+
+const SCENARIOS = [
+	{
+		name: "budget-exceeded",
+		files: {
+			"claims.json": [
+				{
+					id: "c1",
+					type: "factual",
+					topic: "t",
+					content: "x",
+					evidence: "tested",
+				},
+			],
+			"run.json": { budget: { max_rounds: 1 } },
+			"state.json": {
+				round: 1,
+				seen_ids: [],
+				superseded_hashes: [],
+				claims_hash: "seed",
+			},
+		},
+		times: 1,
+	},
+	{
+		name: "dry-round-converged",
+		files: {
+			"claims.json": [
+				{
+					id: "c1",
+					type: "factual",
+					topic: "t",
+					content: "x",
+					evidence: "tested",
+				},
+			],
+		},
+		times: 2,
+	},
+	{
+		name: "dry-round-stuck",
+		files: {
+			"claims.json": [
+				{
+					id: "c1",
+					type: "risk",
+					topic: "t",
+					content: "x",
+					evidence: "documented",
+				},
+			],
+		},
+		times: 2,
+	},
+];
+
+let tpass = 0;
+for (const sc of SCENARIOS) {
+	const ref = tshape(stateful([process.execPath, JS], sc.files, sc.times));
+	const got = tshape(stateful([RS], sc.files, sc.times));
+	const ok = JSON.stringify(ref) === JSON.stringify(got);
+	if (ok) {
+		tpass++;
+		console.log(
+			`  ok    ${sc.name}  (${got.status}, round ${got.round}, cert ${got.cert})`,
+		);
+	} else {
+		fails.push(sc.name);
+		console.log(`  DIFF  ${sc.name}`);
+		console.log(`        ref: ${JSON.stringify(ref)}`);
+		console.log(`        rs : ${JSON.stringify(got)}`);
+	}
+}
+console.log(
+	`${tpass}/${SCENARIOS.length} temporal scenarios match the reference`,
+);
+
+const total = pass + tpass;
+const totalN = fixtures.length + SCENARIOS.length;
+console.log(`\n${total}/${totalN} conformance checks match`);
 process.exit(fails.length ? 1 : 0);

@@ -25,7 +25,11 @@ const TYPES: [&str; 6] = [
 ];
 
 fn tier_rank(t: &str) -> i32 {
-    TIERS.iter().position(|&x| x == t).map(|i| i as i32).unwrap_or(-1)
+    TIERS
+        .iter()
+        .position(|&x| x == t)
+        .map(|i| i as i32)
+        .unwrap_or(-1)
 }
 fn sha_hex(s: &str) -> String {
     let mut h = Sha256::new();
@@ -77,13 +81,21 @@ struct Blocker {
     extra: Vec<(String, Value)>,
 }
 fn b(code: &str, claim: &str) -> Blocker {
-    Blocker { code: code.into(), claim: claim.into(), extra: vec![] }
+    Blocker {
+        code: code.into(),
+        claim: claim.into(),
+        extra: vec![],
+    }
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut dir = std::env::current_dir().unwrap().to_string_lossy().to_string();
+    let mut dir = std::env::current_dir()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
     let mut json_out = false;
+    let mut state_enabled = true;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -95,7 +107,7 @@ fn main() {
                 dir = args[i].clone();
             }
             "--json" => json_out = true,
-            "--no-state" => {} // static slice is always stateless
+            "--no-state" => state_enabled = false,
             "--quiet" => {}
             "-h" | "--help" => {
                 println!("bean-check --dir <path> [--json] [--no-state]");
@@ -121,9 +133,10 @@ fn main() {
         _ => die(3, "claims.json must be an array or { \"claims\": [...] }"),
     };
 
-    // run.json (only evidence_bar is read by this slice; defaults match the JS DEFAULT_RUN)
+    // run.json (evidence_bar + budget read by this slice; defaults match the JS DEFAULT_RUN)
     let mut bar_lb = "tested".to_string();
     let mut bar_rec = "documented".to_string();
+    let mut max_rounds: Option<i64> = Some(6); // DEFAULT_RUN.budget.max_rounds
     if let Ok(rt) = std::fs::read_to_string(bean_dir.join("run.json")) {
         if let Ok(rj) = serde_json::from_str::<Value>(&rt) {
             if let Some(eb) = rj.get("evidence_bar") {
@@ -138,6 +151,10 @@ fn main() {
                     }
                 }
             }
+            // mergeRun: a run.json budget object replaces the default; max_rounds may be absent
+            if let Some(budget) = rj.get("budget") {
+                max_rounds = budget.get("max_rounds").and_then(|v| v.as_i64());
+            }
         }
     }
 
@@ -150,7 +167,9 @@ fn main() {
         let ok = c.is_object()
             && !id_of(c).is_empty()
             && s(c, "type").map(|t| TYPES.contains(&t)).unwrap_or(false)
-            && s(c, "evidence").map(|e| TIERS.contains(&e)).unwrap_or(false);
+            && s(c, "evidence")
+                .map(|e| TIERS.contains(&e))
+                .unwrap_or(false);
         if !ok {
             let cid = if c.is_object() && !id_of(c).is_empty() {
                 id_of(c).to_string()
@@ -198,7 +217,11 @@ fn main() {
                 if valid_resolver(c) || valid_resolver(o) {
                     continue;
                 }
-                let (a, bb) = if id_of(c) < id_of(o) { (id_of(c), id_of(o)) } else { (id_of(o), id_of(c)) };
+                let (a, bb) = if id_of(c) < id_of(o) {
+                    (id_of(c), id_of(o))
+                } else {
+                    (id_of(o), id_of(c))
+                };
                 let key = (a.to_string(), bb.to_string());
                 if !pairs.contains(&key) {
                     pairs.push(key);
@@ -212,7 +235,8 @@ fn main() {
         let mut blk = b("E_CONFLICT", aid);
         blk.extra.push(("with".into(), Value::String(bid.clone())));
         if let Some(topic) = s(ca, "topic") {
-            blk.extra.push(("topic".into(), Value::String(topic.into())));
+            blk.extra
+                .push(("topic".into(), Value::String(topic.into())));
         }
         // dominance: strictly higher tier wins, neither an abstention
         let dom = if is_abstention(ca) || is_abstention(cb) {
@@ -223,17 +247,29 @@ fn main() {
             if ra == rb {
                 None
             } else if ra > rb {
-                Some((id_of(ca), id_of(cb), s(ca, "evidence").unwrap_or(""), s(cb, "evidence").unwrap_or("")))
+                Some((
+                    id_of(ca),
+                    id_of(cb),
+                    s(ca, "evidence").unwrap_or(""),
+                    s(cb, "evidence").unwrap_or(""),
+                ))
             } else {
-                Some((id_of(cb), id_of(ca), s(cb, "evidence").unwrap_or(""), s(ca, "evidence").unwrap_or("")))
+                Some((
+                    id_of(cb),
+                    id_of(ca),
+                    s(cb, "evidence").unwrap_or(""),
+                    s(ca, "evidence").unwrap_or(""),
+                ))
             }
         };
         match dom {
             Some((win, lose, we, le)) => {
                 blk.extra.push(("resolvable".into(), Value::Bool(true)));
-                blk.extra.push(("supersede".into(), Value::String(lose.into())));
+                blk.extra
+                    .push(("supersede".into(), Value::String(lose.into())));
                 blk.extra.push(("keep".into(), Value::String(win.into())));
-                blk.extra.push(("reason".into(), Value::String(format!("{we} > {le}"))));
+                blk.extra
+                    .push(("reason".into(), Value::String(format!("{we} > {le}"))));
             }
             None => blk.extra.push(("resolvable".into(), Value::Bool(false))),
         }
@@ -246,10 +282,12 @@ fn main() {
             Some(Value::Array(deps)) => {
                 for dep in deps {
                     let dep = dep.as_str().unwrap_or("");
-                    let stale = dep == id_of(c) || by_id(dep).map(|d| !is_active(d)).unwrap_or(true);
+                    let stale =
+                        dep == id_of(c) || by_id(dep).map(|d| !is_active(d)).unwrap_or(true);
                     if stale {
                         let mut blk = b("E_STALE_DEPENDENT", id_of(c));
-                        blk.extra.push(("depends_on".into(), Value::String(dep.into())));
+                        blk.extra
+                            .push(("depends_on".into(), Value::String(dep.into())));
                         blockers.push(blk);
                     }
                 }
@@ -273,10 +311,17 @@ fn main() {
     // 3. load-bearing below the evidence bar
     for c in &active {
         if is_load_bearing(c) && !is_abstention(c) {
-            let bar = if s(c, "type") == Some("recommendation") { &bar_rec } else { &bar_lb };
+            let bar = if s(c, "type") == Some("recommendation") {
+                &bar_rec
+            } else {
+                &bar_lb
+            };
             if tier_rank(s(c, "evidence").unwrap_or("")) < tier_rank(bar) {
                 let mut blk = b("E_WEAK_LOADBEARING", id_of(c));
-                blk.extra.push(("have".into(), Value::String(s(c, "evidence").unwrap_or("").into())));
+                blk.extra.push((
+                    "have".into(),
+                    Value::String(s(c, "evidence").unwrap_or("").into()),
+                ));
                 blk.extra.push(("need".into(), Value::String(bar.clone())));
                 blockers.push(blk);
             }
@@ -294,10 +339,110 @@ fn main() {
         }
     }
 
-    let status = if blockers.is_empty() { "ready" } else { "blocked" };
+    // ---- temporal checks (need round history; skipped under --no-state) ----
+    let mut notes: Vec<String> = vec![];
+    let mut warnings: Vec<Blocker> = vec![];
+    if active.is_empty() {
+        notes.push("EMPTY_LEDGER: no active claims to converge".into());
+    }
 
-    // certificate: sha256(JSON({status, admitted})) where admitted = sorted [id,evidence,hash].
-    // Serialized identically to JS JSON.stringify (compact, status-then-admitted, sorted by id).
+    // prior state
+    let mut prior: Option<Value> = None;
+    if state_enabled {
+        if let Ok(t) = std::fs::read_to_string(bean_dir.join("state.json")) {
+            prior = serde_json::from_str::<Value>(&t).ok();
+        }
+    }
+    let prior_seen: Vec<String> = prior
+        .as_ref()
+        .and_then(|p| p.get("seen_ids"))
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let prior_superseded: Vec<String> = prior
+        .as_ref()
+        .and_then(|p| p.get("superseded_hashes"))
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let prior_round = prior
+        .as_ref()
+        .and_then(|p| p.get("round"))
+        .and_then(|v| v.as_i64());
+    let prior_hash = prior
+        .as_ref()
+        .and_then(|p| p.get("claims_hash"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    // W_REAPPEAR — a superseded/rejected claim resurrected as active
+    for c in &active {
+        if prior_superseded.contains(&content_hash(c)) {
+            warnings.push(b("W_REAPPEAR", id_of(c)));
+        }
+    }
+
+    let mut active_ids: Vec<String> = active.iter().map(|c| id_of(c).to_string()).collect();
+    active_ids.sort();
+    let new_this_round = active_ids
+        .iter()
+        .filter(|id| !prior_seen.contains(id))
+        .count();
+
+    // claims_hash: per-claim "id\0contentHash\0evidence" lines, sorted, concatenated. The
+    // reference uses NUL delimiters (they render as spaces in a terminal — match the bytes).
+    let mut hash_lines: Vec<String> = active
+        .iter()
+        .map(|c| {
+            format!(
+                "{}\u{0}{}\u{0}{}",
+                id_of(c),
+                content_hash(c),
+                s(c, "evidence").unwrap_or("")
+            )
+        })
+        .collect();
+    hash_lines.sort();
+    let claims_hash = sha_hex(&hash_lines.join(""));
+
+    let dry = prior.is_some() && prior_hash.as_deref() == Some(claims_hash.as_str());
+    let round = match prior_round {
+        Some(r) => r + if dry { 0 } else { 1 },
+        None => 1,
+    };
+    let open_fronts = !blockers.is_empty();
+    if dry && open_fronts {
+        notes.push("DRY_ROUND_STUCK: a full round added nothing yet open fronts remain".into());
+    }
+    if dry && !open_fronts {
+        notes.push("DRY_ROUND_CONVERGED".into());
+    }
+    let over_budget = max_rounds.map(|m| round > m).unwrap_or(false);
+    if over_budget {
+        notes.push(format!(
+            "OVER_BUDGET: round {round} > max {} — deliver with open fronts named",
+            max_rounds.unwrap()
+        ));
+    }
+
+    let status = if over_budget {
+        "budget-exceeded"
+    } else if !blockers.is_empty() {
+        "blocked"
+    } else {
+        "ready"
+    };
+
+    // certificate: sha256(JSON({status, admitted})), admitted = sorted [id,evidence,hash].
+    // Hand-built to match JS JSON.stringify byte-for-byte (status-first key order, compact).
     let mut admitted: Vec<[String; 3]> = active
         .iter()
         .map(|c| {
@@ -309,9 +454,6 @@ fn main() {
         })
         .collect();
     admitted.sort_by(|x, y| x[0].cmp(&y[0]));
-    // Match JS `JSON.stringify({status, admitted})` BYTE FOR BYTE: keys in insertion order
-    // (status first), compact, no spaces. serde_json's Value sorts keys alphabetically, so
-    // the cert object is hand-built; the admitted array serializes identically either way.
     let cert_str = format!(
         "{{\"status\":{},\"admitted\":{}}}",
         serde_json::to_string(status).unwrap(),
@@ -319,28 +461,70 @@ fn main() {
     );
     let certificate = sha_hex(&cert_str)[..16].to_string();
 
-    if json_out {
-        let blk_json: Vec<Value> = blockers
-            .iter()
-            .map(|x| {
-                let mut m = serde_json::Map::new();
-                m.insert("code".into(), Value::String(x.code.clone()));
-                m.insert("claim".into(), Value::String(x.claim.clone()));
-                for (k, v) in &x.extra {
-                    m.insert(k.clone(), v.clone());
+    // write next state (unless --no-state)
+    if state_enabled {
+        let mut seen: Vec<String> = prior_seen.clone();
+        for id in &active_ids {
+            if !seen.contains(id) {
+                seen.push(id.clone());
+            }
+        }
+        seen.sort();
+        let mut superseded: Vec<String> = prior_superseded.clone();
+        for c in &valid {
+            let st = status_of(c);
+            if st == "superseded" || st == "rejected" {
+                let h = content_hash(c);
+                if !superseded.contains(&h) {
+                    superseded.push(h);
                 }
-                Value::Object(m)
-            })
-            .collect();
+            }
+        }
+        let next = serde_json::json!({
+            "round": round,
+            "seen_ids": seen,
+            "superseded_hashes": superseded,
+            "claims_hash": claims_hash,
+        });
+        let _ = std::fs::write(
+            bean_dir.join("state.json"),
+            serde_json::to_string_pretty(&next).unwrap() + "\n",
+        );
+    }
+
+    if json_out {
+        let to_json = |x: &Blocker| -> Value {
+            let mut m = serde_json::Map::new();
+            m.insert("code".into(), Value::String(x.code.clone()));
+            m.insert("claim".into(), Value::String(x.claim.clone()));
+            for (k, v) in &x.extra {
+                m.insert(k.clone(), v.clone());
+            }
+            Value::Object(m)
+        };
         let out = serde_json::json!({
             "status": status,
-            "blockers": blk_json,
+            "blockers": blockers.iter().map(to_json).collect::<Vec<_>>(),
+            "warnings": warnings.iter().map(to_json).collect::<Vec<_>>(),
+            "notes": notes,
+            "round": round,
+            "max_rounds": max_rounds,
+            "new_this_round": new_this_round,
+            "dry": dry,
             "certificate": certificate,
         });
         println!("{}", serde_json::to_string_pretty(&out).unwrap());
     } else {
-        println!("bean-check: {} (cert {})", status.to_uppercase(), certificate);
+        println!(
+            "bean-check: {} (cert {})",
+            status.to_uppercase(),
+            certificate
+        );
     }
 
-    exit(if status == "ready" { 0 } else { 1 });
+    exit(match status {
+        "ready" => 0,
+        "budget-exceeded" => 2,
+        _ => 1,
+    });
 }
