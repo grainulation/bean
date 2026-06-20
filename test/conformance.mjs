@@ -27,7 +27,9 @@ const build = spawnSync("cargo", ["build", "--release", "--quiet"], {
 	encoding: "utf8",
 });
 if (build.status !== 0) {
-	console.error("cargo build failed:\n" + (build.stderr || build.error?.message));
+	console.error(
+		"cargo build failed:\n" + (build.stderr || build.error?.message),
+	);
 	process.exit(3);
 }
 
@@ -53,7 +55,9 @@ let pass = 0;
 const fails = [];
 for (const f of fixtures) {
 	const dir = path.join(FIX, f);
-	const ref = shape(run(process.execPath, [JS, "--dir", dir, "--json", "--no-state"]));
+	const ref = shape(
+		run(process.execPath, [JS, "--dir", dir, "--json", "--no-state"]),
+	);
 	const got = shape(run(RS, ["--dir", dir, "--json", "--no-state"]));
 	const ok =
 		ref.status === got.status &&
