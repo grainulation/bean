@@ -6,3 +6,8 @@ review/
 bean-stalk.md
 **/.bean/state.json
 
+rs/target/
+/bin/bean-check
+/bin/bean-verify
+/bin/bean-run
+/bin/bean-hook
