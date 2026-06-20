@@ -688,4 +688,71 @@ check(
 	},
 );
 
+// --- oracle PATTERN: implied-post-condition over PERSISTED state (the over-trust fix) ---
+// A naive snapshot oracle that checks only "the items the agent put in the wishlist are
+// there" passes a wrong answer that left them in the cart. The pattern oracle re-reads the
+// persisted state and checks the VERB's implied transition (moved => gone from cart AND in
+// wishlist), catching the miss. Proven end-to-end through the real bean-verify/bean-check.
+/** @returns {string} */
+const moverOracle = () =>
+	[
+		"const fs=require('node:fs'),p=require('node:path');",
+		// fresh read of PERSISTED state (rule 1), next to the ledger — never an in-session value
+		"const s=JSON.parse(fs.readFileSync(p.join(process.cwd(),'.bean','state-log.json'),'utf8'));",
+		// implied post-condition of 'move all from cart to wishlist' (rule 2): cart empty AND
+		// every originally-carted item now in the wishlist
+		"const moved=s.originally_in_cart.every(id=>s.wishlist.includes(id));",
+		"const cartEmpty=s.cart.length===0;",
+		"const ok=moved&&cartEmpty;",
+		"process.stdout.write(JSON.stringify({verdict:ok?'pass':'fail'}));",
+		"process.exit(ok?0:1);",
+	].join("\n");
+
+/** @param {{cart:number[],wishlist:number[]}} persisted @returns {string} */
+const moverFixture = (persisted) => {
+	const dir = tmpFixture({
+		"claims.json": [
+			lbClaim("c1", {
+				type: "recommendation",
+				topic: "move",
+				content: "moved all items from the cart to the wishlist",
+				verified_by: { verifier: "mover" },
+			}),
+		],
+		"run.json": {
+			verification: { mode: "strict" },
+			oracles: { mover: { cmd: [process.execPath, "-e", moverOracle()] } },
+		},
+	});
+	fs.writeFileSync(
+		path.join(dir, ".bean", "state-log.json"),
+		JSON.stringify({ originally_in_cart: [1, 2], ...persisted }),
+	);
+	return dir;
+};
+
+check(
+	"pattern oracle catches a wrong answer a snapshot oracle would pass",
+	() => {
+		// WRONG persisted state: item 2 never left the cart (snapshot of 'wishlist has them' would pass)
+		const dir = moverFixture({ cart: [2], wishlist: [1, 2] });
+		assert.equal(verify(dir, "c1", "mover"), 1); // bean-verify records a fail
+		const { exit, result } = run(dir, ["--no-state"]);
+		assert.equal(result.status, "blocked");
+		assert.equal(exit, 1);
+		assert.ok(result.blockers.some((b) => b.code === "E_ORACLE_FAILED"));
+	},
+);
+
+check(
+	"pattern oracle passes the correct transition (cart emptied, items in wishlist)",
+	() => {
+		const dir = moverFixture({ cart: [], wishlist: [1, 2] });
+		assert.equal(verify(dir, "c1", "mover"), 0);
+		const { exit, result } = run(dir, ["--no-state"]);
+		assert.equal(result.status, "ready");
+		assert.equal(exit, 0);
+	},
+);
+
 console.log(`\n${passed} checks passed`);

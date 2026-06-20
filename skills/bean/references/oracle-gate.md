@@ -99,6 +99,33 @@ changed. The certificate binds the full regime (mode, load-bearing set, residual
 registry, verdicts), so two different verification regimes can never share a certificate; a
 plain 1.x ledger's certificate is unchanged.
 
+## Writing an oracle that doesn't over-trust
+
+An oracle is only as good as its design, and the easy design is the one that over-trusts.
+A self-authored oracle that checks "did I do what I _think_ the task asked," against the
+state it just acted in, is a tautology — it re-encodes the solver's own reading and passes
+its own mistakes. Three rules, each from a real failure where a naive oracle blessed a
+wrong answer:
+
+1. **Read the persisted/committed state, not the in-session belief.** Verify against the
+   same state the consumer of the work will see (re-read from disk / a fresh query / the
+   committed transition log) — never "I saw it succeed a moment ago." A run that succeeded
+   in-session but did not persist must FAIL. (`bean-verify` already runs the oracle as a
+   separate process, so favour reading durable state inside it over passing live values.)
+2. **Check the post-conditions _implied by the task verbs_, not just the constraints you
+   extracted.** "Move X to Y" implies _X is now in Y AND X is no longer in its old place_;
+   "buy everything on the list" implies _an order exists AND the list no longer holds those
+   items_. Check the **deltas/transitions** the verb requires, not only a snapshot of the
+   properties you happened to think mattered.
+3. **Try to falsify, don't confirm.** Enumerate the competing readings of each load-bearing
+   term; if the output is not robust across them and the environment cannot disambiguate,
+   that is a residual (name it) — not a pass on your preferred reading.
+
+Rules 1–2 are mechanically demonstrable: an oracle that re-reads committed state and checks
+the verb's implied transition catches errors a snapshot-of-my-own-reading oracle passes.
+Rule 3 is the irreducible part — where no signal in spec or environment can settle a
+reading (a pure convention), the honest output is a residual, and over-trust there is real.
+
 ## Honest limits
 
 - **Over-trust is the central limit**, not a footnote: a verifier testing the wrong thing
