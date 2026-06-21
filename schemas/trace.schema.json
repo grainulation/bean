@@ -2,7 +2,7 @@
 	"$schema": "http://json-schema.org/draft-07/schema#",
 	"$id": "https://github.com/grainulation/bean/schemas/trace.schema.json",
 	"title": "bean run trace artifact (v0)",
-	"description": "Stable post-run record emitted by bean-run to .bean/runs/<run_id>.json. v0 is an EMIT-ONLY artifact: it lets future tooling analyze runs without scraping transcripts. It does NOT make bean learn across tasks — no memory mutation, prompt rewriting, or cross-run optimization.",
+	"description": "Stable post-run record emitted by bean-run to .bean/runs/<run_id>.json. v0 is an EMIT-ONLY artifact: it lets future tooling analyze runs without scraping transcripts. It does NOT make bean learn across tasks — no memory mutation, prompt rewriting, or cross-run optimization. The top-level shape is FIXED: unknown top-level keys are rejected; additive/experimental fields go under `metadata`.",
 	"type": "object",
 	"required": [
 		"schema_version",
@@ -20,7 +20,7 @@
 		"residuals",
 		"artifacts_changed"
 	],
-	"additionalProperties": true,
+	"additionalProperties": false,
 	"properties": {
 		"schema_version": { "const": "trace/v0" },
 		"run_id": {
@@ -89,6 +89,11 @@
 			"type": "array",
 			"description": "Files the run changed, when available. v0 does not track this yet; emitted as [] for shape stability.",
 			"items": { "type": "string" }
+		},
+		"metadata": {
+			"type": "object",
+			"additionalProperties": true,
+			"description": "Documented extension hatch. The top-level shape is fixed; additive or experimental fields go here so adding them never breaks v0 validation. Emitted as {} by default."
 		}
 	}
 }

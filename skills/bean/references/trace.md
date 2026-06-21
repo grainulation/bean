@@ -31,6 +31,20 @@ Schema: [`schemas/trace.schema.json`](../../../schemas/trace.schema.json) (`sche
 | `verifier_verdicts`       | The scrubbed verdicts from `.bean/verdicts/`, embedded verbatim.                   |
 | `residuals`               | Claims tagged `residual`, each `{id, reason}` (reason = the claim content).        |
 | `artifacts_changed`       | Files the run changed, when available. v0 does not track this yet → `[]`.          |
+| `metadata`                | Extension hatch (`{}` by default). Additive/experimental fields go here.           |
+
+## Stability rules
+
+- **The top-level shape is fixed.** The schema is `additionalProperties: false` — unknown
+  top-level keys are rejected. This catches drift and typos. Any new field goes under
+  `metadata` (the documented hatch), so adding it never breaks v0 validation. A breaking change
+  to the fixed keys bumps `schema_version`.
+- **Emission fails closed.** If `bean-run` cannot persist the trace, it does NOT report a clean
+  exit. It prints the run outcome to stderr and exits with the infra/load error code (`3`),
+  distinct from any convergence outcome — the trace is part of the run's contract.
+- **Emitted traces are runtime artifacts, not source.** `**/.bean/runs/` (and
+  `**/.bean/verdicts-raw/`) are gitignored. Do not commit emitted traces. Sample traces needed
+  by tests live under `test/fixtures/traces/`, never under a `.bean/runs/` path (which is ignored).
 
 ## What consumes it (later, not now)
 

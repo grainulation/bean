@@ -321,7 +321,9 @@ console.log(`${dpass}/3 driver smoke checks pass`);
 	const files = fs.existsSync(runsDir)
 		? fs.readdirSync(runsDir).filter((f) => f.endsWith(".json"))
 		: [];
-	const REQUIRED = [
+	// ALLOWED == the fixed top-level shape. metadata is the only extension hatch; any OTHER
+	// unknown top-level key is drift and must fail (matches schema additionalProperties:false).
+	const ALLOWED = [
 		"schema_version",
 		"run_id",
 		"goal",
@@ -336,24 +338,29 @@ console.log(`${dpass}/3 driver smoke checks pass`);
 		"verifier_verdicts",
 		"residuals",
 		"artifacts_changed",
+		"metadata",
 	];
 	let ok = files.length === 1;
 	let why = ok ? "" : `expected 1 trace file, got ${files.length}`;
 	if (ok) {
 		const t = JSON.parse(fs.readFileSync(path.join(runsDir, files[0]), "utf8"));
-		const missing = REQUIRED.filter((k) => !(k in t));
+		const missing = ALLOWED.filter((k) => !(k in t));
+		const unknown = Object.keys(t).filter((k) => !ALLOWED.includes(k));
 		const shapeOk =
 			t.schema_version === "trace/v0" &&
 			missing.length === 0 &&
+			unknown.length === 0 &&
 			files[0] === `${t.run_id}.json` &&
 			t.status === report.outcome &&
 			Array.isArray(t.verifier_verdicts) &&
 			Array.isArray(t.residuals) &&
-			Array.isArray(t.artifacts_changed);
+			Array.isArray(t.artifacts_changed) &&
+			typeof t.metadata === "object" &&
+			!Array.isArray(t.metadata);
 		ok = shapeOk;
 		why = shapeOk
 			? ""
-			: `schema_version=${t.schema_version} missing=[${missing}] status=${t.status} vs ${report.outcome}`;
+			: `schema_version=${t.schema_version} missing=[${missing}] unknown=[${unknown}] status=${t.status} vs ${report.outcome}`;
 	}
 	if (ok) {
 		console.log("  ok    trace artifact v0 written with stable shape");

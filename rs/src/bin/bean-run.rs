@@ -482,13 +482,38 @@ fn main() {
         "verifier_verdicts": verifier_verdicts,
         "residuals": residuals,
         "artifacts_changed": Vec::<String>::new(),
+        // documented extension hatch: additive/experimental fields go HERE, so the top-level
+        // shape stays fixed (the schema rejects unknown top-level keys).
+        "metadata": serde_json::Map::new(),
     });
+    // Fail CLOSED on a trace-write failure: the trace is part of bean-run's contract, so we must
+    // not report a clean exit (0/2/4) if we couldn't persist it. Surface the outcome on stderr,
+    // then exit with the infra/load error code (3) — distinct from any convergence outcome.
     let runs_dir = bean_dir.join("runs");
-    let _ = std::fs::create_dir_all(&runs_dir);
-    let _ = std::fs::write(
-        runs_dir.join(format!("{run_id}.json")),
-        serde_json::to_string_pretty(&trace_artifact).unwrap() + "\n",
-    );
+    let trace_path = runs_dir.join(format!("{run_id}.json"));
+    let wrote = std::fs::create_dir_all(&runs_dir).and_then(|_| {
+        std::fs::write(
+            &trace_path,
+            serde_json::to_string_pretty(&trace_artifact).unwrap() + "\n",
+        )
+    });
+    if let Err(e) = wrote {
+        eprintln!(
+            "bean-run: run outcome was {} (cert {}) but the trace could not be persisted",
+            outcome,
+            final_sig
+                .get("certificate")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+        );
+        die(
+            3,
+            &format!(
+                "could not write trace artifact {}: {e} — failing closed",
+                trace_path.display()
+            ),
+        );
+    }
 
     let report = serde_json::json!({
         "outcome": outcome,
