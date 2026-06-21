@@ -10,13 +10,25 @@
 
 <h1 align="center">bean</h1>
 
-<p align="center"><strong>A recursive convergence loop for large tasks — for Claude Code and Codex.</strong></p>
+<p align="center"><strong>A portable convergence gate for agent work — Claude Code, Codex, and beyond.</strong></p>
 
 <p align="center">
-Run a task as a loop: investigate, record what you learn as typed claims, let a compiler tell you what's still weak, contradictory, or unverified, revise the beliefs that don't hold, and loop until it converges — then deliver. In 2.0 the runtime is a single Rust binary that couples to your agent natively, so the loop can't quietly stop early.
+bean keeps an agent loop from declaring <strong>"done"</strong> until its claims are verified, its conflicts are resolved, or its open questions are named as honest residuals. It tracks what the agent learns as a typed claim ledger, runs a compiler that scores whether the work has actually converged, and — when installed as a runtime — blocks the agent from finishing through a native Stop hook until it has.
 </p>
 
 ---
+
+## Two modes
+
+- **Plugin-only (advisory).** The `/bean` skill gives the agent the convergence loop as guidance. No enforcement — it's discipline the agent can still skip.
+- **Installed runtime (enforced).** `./install.sh` builds the static binaries and registers the native Stop hook. Now `bean-check` is a **hard gate**: the agent literally cannot finish a bean-tracked task until the ledger converges or names its residuals.
+
+The difference is the whole point: most "loop until done" tools stop when _the model says it's done_ or when _an LLM judges the diff_. bean stops when **scored evidence has converged and the agent can't talk past it** — an independent, deterministic arbiter, not self-judgment.
+
+## What bean is not
+
+- **Not an agent framework.** Eve, Flue, and LangGraph own agents, tools, sandboxes, channels, and durable execution. bean rides _inside_ an agent loop as the verification/convergence layer — it complements those, it doesn't replace them.
+- **Not a broad accuracy booster.** bean doesn't make a model smarter. It reduces _silent false completion_ — turning "confidently wrong and done" into verified, fixed, or honestly blocked.
 
 ## What it does
 
@@ -78,13 +90,21 @@ A single self-contained binary per tool — no install dependency. (The JS `bean
 
 The 2.0 oracle gate is opt-in via `run.json` → `verification.mode`: `compat` (default, == 1.x), `advisory` (warn), `strict` (require a passing oracle or a named residual). See [`skills/bean/references/oracle-gate.md`](skills/bean/references/oracle-gate.md).
 
-**[grainulator/wheat](https://github.com/grainulation/grainulator)** is an optional richer backend; bean works fully without it.
+bean works standalone with local files and binaries; an optional richer backend can plug in when present, but is never required.
+
+## Adapters
+
+The gate is host-agnostic — the same Rust core runs anywhere:
+
+- **Claude Code & Codex** — native Stop hook (shipping). The `/bean` skill plus `bean-hook`.
+- **LangGraph / Eve / Flue / CI** — call `bean-check` / `bean-verify` as a verification step that blocks "done" until the ledger converges _(planned; subprocess first, an embeddable build later)_.
 
 ## Philosophy
 
 - **Lean.** One static binary, zero runtime dependencies, no network by default, no telemetry.
 - **A real gate.** `bean-check` makes convergence falsifiable; the oracle gate makes it _external_ — auditable verification, not a self-graded checkmark.
-- **Coupled, not advisory.** Native hooks mean the discipline can't be silently skipped — the honest end state Fable had and a plain skill can't.
+- **Coupled, not advisory.** When the runtime is installed, native hooks mean the discipline can't be silently skipped — the loop reaches an honest end state a plain skill can't enforce.
+- **Discipline, not a transplant.** bean shapes the procedure an agent follows; it doesn't raise the model's ceiling. A weak model with bean converges on its answer more honestly, not more brilliantly.
 
 ## Contributing
 
