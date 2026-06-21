@@ -5,6 +5,8 @@ review/
 .farmer-state.json
 bean-stalk.md
 **/.bean/state.json
+**/.bean/runs/
+**/.bean/verdicts-raw/
 
 rs/target/
 /bin/bean-check
