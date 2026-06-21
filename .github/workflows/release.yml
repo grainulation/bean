@@ -11,7 +11,7 @@ permissions:
 jobs:
   # Build each target with an explicit --target on a readily-available host (the x86_64 macOS
   # binary is cross-compiled from the arm runner — no scarce Intel runner needed). Package the
-  # four binaries into a per-target tarball and upload as a workflow artifact.
+  # five binaries into a per-target tarball and upload as a workflow artifact.
   build:
     strategy:
       fail-fast: false
