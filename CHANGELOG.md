@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Trace artifact v0 (emit-only).** Every `bean-run` now writes a stable post-run record to
+  `.bean/runs/<run_id>.json`: `schema_version`, `run_id`, `goal`, `started_at`/`ended_at`,
+  `status`, `certificate`, `rounds`, `pivot_count`, `blockers_opened`/`blockers_closed`,
+  `verifier_verdicts`, `residuals`, `artifacts_changed`. One file per run (not a rolling file),
+  so future tooling can analyze a corpus of runs without scraping transcripts. Schema:
+  `schemas/trace.schema.json`; docs: `skills/bean/references/trace.md`; conformance asserts the
+  shape is stable. **Scope:** this does NOT make bean learn across tasks — no memory mutation,
+  prompt rewriting, or cross-run optimization. It only emits the artifact.
+
 ## 2.0.2 — driver "pivot, don't stop" + review hardening
 
 Adds the "pivot, don't stop" driver discipline, then hardens it: a cross-model (Codex) review

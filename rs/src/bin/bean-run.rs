@@ -21,8 +21,10 @@
 // Exit: 0 = ready, 4 = converged-with-residuals, 2 = budget-exceeded, 5 = stuck, 3 = usage/load.
 
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{exit, Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn die(code: i32, msg: &str) -> ! {
     eprintln!("bean-run: {msg}");
@@ -145,6 +147,30 @@ fn frontier(sig: &Value) -> String {
         .unwrap_or_default();
     fronts.sort();
     format!("{status}\u{1e}{}", fronts.join("\u{1d}"))
+}
+
+// the open-front keys (code:claim) in a compiler signal — used for trace blockers_opened/closed.
+fn blocker_keys(sig: &Value) -> Vec<String> {
+    sig.get("blockers")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .map(|bl| {
+                    format!(
+                        "{}:{}",
+                        bl.get("code").and_then(|v| v.as_str()).unwrap_or(""),
+                        bl.get("claim").and_then(|v| v.as_str()).unwrap_or("")
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn epoch_ms(t: SystemTime) -> u64 {
+    t.duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 fn is_active(c: &Value) -> bool {
     let st = c.get("status").and_then(|v| v.as_str()).unwrap_or("");
@@ -309,6 +335,17 @@ fn main() {
     // a different front/approach) before declaring a true "stuck" stop. ALLOWED_PIVOTS=2 means
     // two no-progress rounds are turned into pivots; a third with still no progress is "stuck".
     const ALLOWED_PIVOTS: i32 = 2;
+    // trace artifact v0: stamp the run boundary + accumulate the set of open fronts ever seen.
+    let run_start = SystemTime::now();
+    let started_at = epoch_ms(run_start);
+    let run_id = format!(
+        "run-{}",
+        run_start
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0)
+    );
+    let mut blockers_seen: BTreeSet<String> = BTreeSet::new();
     let mut trace: Vec<Value> = vec![];
     // Natural max-rounds exhaustion is the hard round ceiling (budget-exceeded, exit 2), NOT
     // "stuck": bean-check runs with --no-state here, so it never emits budget-exceeded itself —
@@ -326,6 +363,9 @@ fn main() {
             .unwrap_or("")
             .to_string();
         let front = frontier(&sig);
+        for k in blocker_keys(&sig) {
+            blockers_seen.insert(k);
+        }
         let has_blockers = sig
             .get("blockers")
             .and_then(|v| v.as_array())
@@ -383,6 +423,73 @@ fn main() {
     }
 
     let final_sig = compile();
+
+    // ---- trace artifact v0 ----------------------------------------------------------------
+    // Leave behind a stable, useful post-run record so future tooling can analyze runs without
+    // scraping transcripts. This does NOT make bean learn across tasks; it only emits the trace.
+    // One file per run (.bean/runs/<run_id>.json) — cross-task analysis needs accumulated runs.
+    let final_blockers: BTreeSet<String> = blocker_keys(&final_sig).into_iter().collect();
+    let blockers_closed = blockers_seen
+        .iter()
+        .filter(|k| !final_blockers.contains(*k))
+        .count();
+    let pivot_count = trace
+        .iter()
+        .filter(|t| t.get("pivot").and_then(|v| v.as_bool()).unwrap_or(false))
+        .count();
+    let final_claims = read_claims(&bean_dir);
+    let residuals: Vec<Value> = final_claims
+        .iter()
+        .filter(|c| {
+            c.get("tags")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().any(|t| t.as_str() == Some("residual")))
+                .unwrap_or(false)
+        })
+        .map(|c| {
+            serde_json::json!({
+                "id": c.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "reason": c.get("content").and_then(|v| v.as_str()).unwrap_or(""),
+            })
+        })
+        .collect();
+    let mut verifier_verdicts: Vec<Value> = vec![];
+    if let Ok(rd) = std::fs::read_dir(bean_dir.join("verdicts")) {
+        let mut paths: Vec<PathBuf> = rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().map(|x| x == "json").unwrap_or(false))
+            .collect();
+        paths.sort();
+        for p in paths {
+            if let Some(v) = load_value(&p) {
+                verifier_verdicts.push(v);
+            }
+        }
+    }
+    let trace_artifact = serde_json::json!({
+        "schema_version": "trace/v0",
+        "run_id": run_id,
+        "goal": goal,
+        "started_at": started_at,
+        "ended_at": epoch_ms(SystemTime::now()),
+        "status": outcome,
+        "certificate": final_sig.get("certificate").and_then(|v| v.as_str()).unwrap_or(""),
+        "rounds": trace.len(),
+        "pivot_count": pivot_count,
+        "blockers_opened": blockers_seen.len(),
+        "blockers_closed": blockers_closed,
+        "verifier_verdicts": verifier_verdicts,
+        "residuals": residuals,
+        "artifacts_changed": Vec::<String>::new(),
+    });
+    let runs_dir = bean_dir.join("runs");
+    let _ = std::fs::create_dir_all(&runs_dir);
+    let _ = std::fs::write(
+        runs_dir.join(format!("{run_id}.json")),
+        serde_json::to_string_pretty(&trace_artifact).unwrap() + "\n",
+    );
+
     let report = serde_json::json!({
         "outcome": outcome,
         "rounds": trace.len(),

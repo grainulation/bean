@@ -254,7 +254,7 @@ const drive = (agent, claims) => {
 			encoding: "utf8",
 		},
 	);
-	return { exit: r.status, report: JSON.parse(r.stdout) };
+	return { exit: r.status, report: JSON.parse(r.stdout), dir };
 };
 let dpass = 0;
 const OPEN_RISK = JSON.stringify([
@@ -313,6 +313,55 @@ for (const [name, agent, want, exit, minRounds, wantPivot] of [
 	}
 }
 console.log(`${dpass}/3 driver smoke checks pass`);
+
+// ---- trace artifact v0 (emit-only): a run leaves a stable .bean/runs/<run_id>.json ----
+{
+	const { report, dir } = drive(DISCHARGE, OPEN_RISK);
+	const runsDir = path.join(dir, ".bean", "runs");
+	const files = fs.existsSync(runsDir)
+		? fs.readdirSync(runsDir).filter((f) => f.endsWith(".json"))
+		: [];
+	const REQUIRED = [
+		"schema_version",
+		"run_id",
+		"goal",
+		"started_at",
+		"ended_at",
+		"status",
+		"certificate",
+		"rounds",
+		"pivot_count",
+		"blockers_opened",
+		"blockers_closed",
+		"verifier_verdicts",
+		"residuals",
+		"artifacts_changed",
+	];
+	let ok = files.length === 1;
+	let why = ok ? "" : `expected 1 trace file, got ${files.length}`;
+	if (ok) {
+		const t = JSON.parse(fs.readFileSync(path.join(runsDir, files[0]), "utf8"));
+		const missing = REQUIRED.filter((k) => !(k in t));
+		const shapeOk =
+			t.schema_version === "trace/v0" &&
+			missing.length === 0 &&
+			files[0] === `${t.run_id}.json` &&
+			t.status === report.outcome &&
+			Array.isArray(t.verifier_verdicts) &&
+			Array.isArray(t.residuals) &&
+			Array.isArray(t.artifacts_changed);
+		ok = shapeOk;
+		why = shapeOk
+			? ""
+			: `schema_version=${t.schema_version} missing=[${missing}] status=${t.status} vs ${report.outcome}`;
+	}
+	if (ok) {
+		console.log("  ok    trace artifact v0 written with stable shape");
+	} else {
+		fails.push("trace artifact v0");
+		console.log(`  DIFF  trace artifact v0: ${why}`);
+	}
+}
 
 // ---- oracle-gate behavior (bean-check 2.0 + bean-verify) ----
 // No JS reference for the gate on this branch, so these are assertion-based behavioral checks.
