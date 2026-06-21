@@ -11,6 +11,7 @@
 //
 // Once this is green, Rust bean-check has earned the right to gate its own development
 // (the self-hosting ratchet).
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -49,6 +50,8 @@ const shape = (r) => ({
 const fixtures = fs
 	.readdirSync(FIX, { withFileTypes: true })
 	.filter((e) => e.isDirectory())
+	// `traces/` holds trace/v0 sample files for bean-lessons, not bean-check claim fixtures.
+	.filter((e) => e.name !== "traces")
 	.map((e) => e.name)
 	.sort();
 
@@ -566,7 +569,111 @@ console.log(
 	`${gpass}/${GATE_CASES.length + 1} oracle-gate behavior checks pass`,
 );
 
-const total = pass + tpass + dpass + gpass;
-const totalN = fixtures.length + SCENARIOS.length + 3 + GATE_CASES.length + 1;
-console.log(`\n${total}/${totalN} conformance + driver + gate checks pass`);
+// ---- bean-lessons (trace analyzer, read-only) ----
+const LESSONS = path.join(root, "rs", "target", "release", "bean-lessons");
+const FIXTURE_TRACES = path.join(root, "test", "fixtures", "traces");
+/** @param {string[]} files */
+const lessonsDir = (files) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bean-lessons-"));
+	fs.mkdirSync(path.join(dir, ".bean", "runs"), { recursive: true });
+	for (const [name, body] of files)
+		fs.writeFileSync(path.join(dir, ".bean", "runs", name), body);
+	return dir;
+};
+const fixtureCorpus = fs
+	.readdirSync(FIXTURE_TRACES)
+	.filter((f) => f.endsWith(".json"))
+	.map((f) => [f, fs.readFileSync(path.join(FIXTURE_TRACES, f), "utf8")]);
+let lpass = 0;
+const lcheck = (name, fn) => {
+	try {
+		fn();
+		lpass++;
+		console.log(`  ok    ${name}`);
+	} catch (e) {
+		fails.push(name);
+		console.log(`  DIFF  ${name}: ${e.message}`);
+	}
+};
+const runLessons = (dir) => {
+	const r = spawnSync(LESSONS, ["--dir", dir], { encoding: "utf8" });
+	const p = path.join(dir, ".bean", "lessons.json");
+	return {
+		exit: r.status,
+		report: fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, "utf8")) : null,
+	};
+};
+lcheck("lessons: ranks all 5 kinds from the fixture corpus", () => {
+	const dir = lessonsDir(fixtureCorpus);
+	const { exit, report } = runLessons(dir);
+	assert.equal(exit, 0, `exit ${exit}`);
+	assert.equal(report.schema_version, "bean.lessons.v0");
+	assert.equal(report.source_run_count, 4);
+	const top = report.candidates[0];
+	assert.equal(top.kind, "blocker_code_frequency");
+	assert.equal(top.signal, "E_OPEN_RISK");
+	assert.equal(top.count, 3);
+	assert.equal(top.rank, 1);
+	const kinds = new Set(report.candidates.map((c) => c.kind));
+	for (const k of [
+		"recurring_residual",
+		"high_pivot",
+		"budget_exceeded",
+		"blocker_code_frequency",
+		"verifier_failure",
+	])
+		assert.ok(kinds.has(k), `missing kind ${k}`);
+	const rr = report.candidates.find((c) => c.kind === "recurring_residual");
+	assert.equal(rr.count, 2);
+	assert.equal(rr.signal, "no write access to staging");
+});
+lcheck("lessons: deterministic (modulo generated_at)", () => {
+	const dir = lessonsDir(fixtureCorpus);
+	const a = runLessons(dir).report;
+	const b = runLessons(dir).report;
+	delete a.generated_at;
+	delete b.generated_at;
+	assert.equal(JSON.stringify(a), JSON.stringify(b));
+});
+lcheck("lessons: empty corpus -> exit 2, report written", () => {
+	const dir = lessonsDir([]);
+	const { exit, report } = runLessons(dir);
+	assert.equal(exit, 2, `exit ${exit}`);
+	assert.equal(report.source_run_count, 0);
+	assert.deepEqual(report.candidates, []);
+});
+lcheck("lessons: malformed trace -> exit 3 (fail closed)", () => {
+	const dir = lessonsDir([["bad.json", "{ not json"]]);
+	const { exit } = runLessons(dir);
+	assert.equal(exit, 3, `exit ${exit}`);
+});
+lcheck("lessons: foreign schema_version -> exit 3", () => {
+	const dir = lessonsDir([
+		["x.json", JSON.stringify({ schema_version: "trace/v9" })],
+	]);
+	const { exit } = runLessons(dir);
+	assert.equal(exit, 3, `exit ${exit}`);
+});
+lcheck(
+	"lessons: trace/v0 missing required fields -> exit 3 (fail closed)",
+	() => {
+		// correct schema_version but a partial/copied trace must NOT be silently summarized.
+		const dir = lessonsDir([
+			[
+				"partial.json",
+				JSON.stringify({ schema_version: "trace/v0", run_id: "x" }),
+			],
+		]);
+		const { exit } = runLessons(dir);
+		assert.equal(exit, 3, `exit ${exit}`);
+	},
+);
+console.log(`${lpass}/6 bean-lessons checks pass`);
+
+const total = pass + tpass + dpass + gpass + lpass;
+const totalN =
+	fixtures.length + SCENARIOS.length + 3 + GATE_CASES.length + 1 + 6;
+console.log(
+	`\n${total}/${totalN} conformance + driver + gate + lessons checks pass`,
+);
 process.exit(fails.length ? 1 : 0);

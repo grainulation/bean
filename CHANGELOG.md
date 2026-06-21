@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **`bean-lessons` — trace analyzer (read-only, deterministic).** Reads the `.bean/runs/*.json`
+  trace corpus and writes a ranked lessons-candidates report to `.bean/lessons.json` (+ optional
+  `--markdown`). Five candidate kinds: `recurring_residual`, `high_pivot`, `budget_exceeded`,
+  `blocker_code_frequency`, `verifier_failure`. No LLM, no network. Read-only with respect to
+  claims, prompts, skills, and memory — it **proposes, never applies** (this is NOT cross-task
+  learning). Exit codes: `0` candidates found, `2` none/empty corpus (report still written), `3`
+  invalid corpus or write failure (fail closed). Schema: `schemas/lessons.schema.json`; docs:
+  `skills/bean/references/lessons.md`; fixtures: `test/fixtures/traces/`; built + shipped by
+  `install.sh` and the release tarballs.
+
 - **Trace artifact v0 (emit-only).** Every `bean-run` now writes a stable post-run record to
   `.bean/runs/<run_id>.json`: `schema_version`, `run_id`, `goal`, `started_at`/`ended_at`,
   `status`, `certificate`, `rounds`, `pivot_count`, `blockers_opened`/`blockers_closed`,

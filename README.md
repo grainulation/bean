@@ -52,7 +52,7 @@ git clone https://github.com/grainulation/bean.git
 cd bean && ./install.sh
 ```
 
-This builds the runtime (`bean-check`, `bean-verify`, `bean-run`, `bean-hook`), installs the `/bean` skill, and registers the native Stop hook for Claude Code and Codex.
+This builds the runtime (`bean-check`, `bean-verify`, `bean-run`, `bean-hook`, `bean-lessons`), installs the `/bean` skill, and registers the native Stop hook for Claude Code and Codex.
 
 **Prebuilt binaries** (no Rust): download the tarball for your platform from the [latest release](https://github.com/grainulation/bean/releases) and put the binaries on your `PATH`.
 
@@ -79,14 +79,15 @@ bean also triggers on "do this thoroughly", "be systematic", or when a task obje
 | **5. Revise beliefs** | Supersede claims that new evidence overturns; resolve conflicts.                     |
 | **6. Converged?**     | No unresolved conflicts + evidence bar (or oracle) met + a dry round → deliver.      |
 
-## The runtime (four binaries)
+## The runtime (five binaries)
 
 A single self-contained binary per tool — no install dependency. (The JS `bean-check` is kept as the conformance reference; the Rust runtime must match it byte-for-byte, including certificates.)
 
 - **`bean-check`** — the compiler/gate. Reads `.bean/claims.json` (+ optional `run.json`) and exits nonzero until the loop converges: conflicts, undischarged risks, below-bar load-bearing claims, dry-round, budget — plus the 2.0 oracle gate. Emits a deterministic certificate.
 - **`bean-verify`** — the only path that runs an oracle: a declared command (argv, no shell, claim JSON on stdin); records a scrubbed verdict `bean-check` adjudicates.
-- **`bean-run`** — the driver: injects the compiler signal into the agent's prompt each round, records what it emits, enforces forward progress. Model-agnostic (`--agent "claude -p"` / `"codex exec -"`).
+- **`bean-run`** — the driver: injects the compiler signal into the agent's prompt each round, records what it emits, enforces forward progress, and writes a per-run trace artifact (`.bean/runs/<run_id>.json`). Model-agnostic (`--agent "claude -p"` / `"codex exec -"`).
 - **`bean-hook`** — the native Stop hook for Claude Code and Codex: blocks the agent from finishing until the loop converges; inert when a project has no `.bean/` ledger.
+- **`bean-lessons`** — read-only trace analyzer: reads `.bean/runs/*.json` and writes a ranked lessons-candidates report (`.bean/lessons.json`). Deterministic; proposes, never applies.
 
 The 2.0 oracle gate is opt-in via `run.json` → `verification.mode`: `compat` (default, == 1.x), `advisory` (warn), `strict` (require a passing oracle or a named residual). See [`skills/bean/references/oracle-gate.md`](skills/bean/references/oracle-gate.md).
 
