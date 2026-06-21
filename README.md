@@ -56,7 +56,7 @@ This builds the runtime (`bean-check`, `bean-verify`, `bean-run`, `bean-hook`, `
 
 **Prebuilt binaries** (no Rust): download the tarball for your platform from the [latest release](https://github.com/grainulation/bean/releases) and put the binaries on your `PATH`.
 
-> The Claude Code marketplace install (`claude plugin install bean`) gives you the `/bean` skill and the hook config; the runtime binary still has to be present — build it with `./install.sh` or drop a prebuilt one in. Pin a tagged release (e.g. `v2.0.0`) and re-review on update.
+> The Claude Code marketplace install (`claude plugin install bean`) gives you the `/bean` skill and the hook config; the runtime binary still has to be present — build it with `./install.sh` or drop a prebuilt one in. Pin a tagged release (e.g. `v2.1.0`) and re-review on update.
 
 ## Use
 

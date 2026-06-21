@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 2.1.0 — trace artifacts + read-only lessons analyzer
+
+The runtime now emits per-run evidence and reads it back into ranked failure-pattern candidates
+for a human to triage. Deterministic and read-only — it surfaces patterns, it does not act on
+them. No cross-task learning, no autonomous improvement, no accuracy claim.
 
 - **`bean-lessons` — trace analyzer (read-only, deterministic).** Reads the `.bean/runs/*.json`
   trace corpus and writes a ranked lessons-candidates report to `.bean/lessons.json` (+ optional

@@ -1,6 +1,6 @@
 {
 	"name": "bean",
-	"version": "2.0.2",
+	"version": "2.1.0",
 	"description": "A Codex /bean skill for running large tasks as a recursive convergence loop. Full enforcement comes from the installed bean runtime: bean-check plus the native Codex Stop hook.",
 	"author": {
 		"name": "Grainulation"
