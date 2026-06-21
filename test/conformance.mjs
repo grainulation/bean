@@ -335,6 +335,7 @@ console.log(`${dpass}/3 driver smoke checks pass`);
 		"pivot_count",
 		"blockers_opened",
 		"blockers_closed",
+		"blocker_codes",
 		"verifier_verdicts",
 		"residuals",
 		"artifacts_changed",
@@ -346,6 +347,15 @@ console.log(`${dpass}/3 driver smoke checks pass`);
 		const t = JSON.parse(fs.readFileSync(path.join(runsDir, files[0]), "utf8"));
 		const missing = ALLOWED.filter((k) => !(k in t));
 		const unknown = Object.keys(t).filter((k) => !ALLOWED.includes(k));
+		const bc = t.blocker_codes;
+		// blocker_codes must be a sorted, unique string[] and (for this fixture, where round 1
+		// has an open risk) contain E_OPEN_RISK.
+		const bcOk =
+			Array.isArray(bc) &&
+			bc.every((x) => typeof x === "string") &&
+			JSON.stringify(bc) === JSON.stringify([...bc].sort()) &&
+			new Set(bc).size === bc.length &&
+			bc.includes("E_OPEN_RISK");
 		const shapeOk =
 			t.schema_version === "trace/v0" &&
 			missing.length === 0 &&
@@ -355,12 +365,13 @@ console.log(`${dpass}/3 driver smoke checks pass`);
 			Array.isArray(t.verifier_verdicts) &&
 			Array.isArray(t.residuals) &&
 			Array.isArray(t.artifacts_changed) &&
+			bcOk &&
 			typeof t.metadata === "object" &&
 			!Array.isArray(t.metadata);
 		ok = shapeOk;
 		why = shapeOk
 			? ""
-			: `schema_version=${t.schema_version} missing=[${missing}] unknown=[${unknown}] status=${t.status} vs ${report.outcome}`;
+			: `schema_version=${t.schema_version} missing=[${missing}] unknown=[${unknown}] blocker_codes=${JSON.stringify(bc)} status=${t.status} vs ${report.outcome}`;
 	}
 	if (ok) {
 		console.log("  ok    trace artifact v0 written with stable shape");
