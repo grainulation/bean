@@ -39,7 +39,10 @@ jobs:
         run: |
           set -eu
           out="rs/target/${{ matrix.target }}/release"
-          "$out/bean-check" --help >/dev/null
+          # all five runtime binaries must be present and runnable
+          for b in bean-check bean-verify bean-run bean-hook bean-lessons; do
+            "$out/$b" --help >/dev/null
+          done
           "$out/bean-check" --dir test/fixtures/converged --no-state >/dev/null   # exit 0 ready
           if "$out/bean-check" --dir test/fixtures/open-risk --no-state; then
             echo "expected blocked exit"; exit 1

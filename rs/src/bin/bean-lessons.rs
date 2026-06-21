@@ -35,6 +35,58 @@ fn norm(reason: &str) -> String {
         .to_lowercase()
 }
 
+// The trace/v0 required keys. bean-lessons is downstream of a strict trace schema; a partial or
+// hand-copied corpus must FAIL CLOSED rather than be silently summarized into misleading
+// candidates (missing run_id/status/arrays would otherwise default to empty).
+const TRACE_REQUIRED: &[&str] = &[
+    "schema_version",
+    "run_id",
+    "goal",
+    "started_at",
+    "ended_at",
+    "status",
+    "certificate",
+    "rounds",
+    "pivot_count",
+    "blockers_opened",
+    "blockers_closed",
+    "blocker_codes",
+    "verifier_verdicts",
+    "residuals",
+    "artifacts_changed",
+];
+
+fn validate_trace(v: &Value) -> Result<(), String> {
+    for k in TRACE_REQUIRED {
+        if v.get(*k).is_none() {
+            return Err(format!("missing required field `{k}`"));
+        }
+    }
+    if v.get("run_id")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+        .is_none()
+    {
+        return Err("`run_id` must be a non-empty string".into());
+    }
+    if v.get("status")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+        .is_none()
+    {
+        return Err("`status` must be a non-empty string".into());
+    }
+    if v.get("pivot_count").and_then(|x| x.as_u64()).is_none() {
+        return Err("`pivot_count` must be a non-negative integer".into());
+    }
+    for arr in ["blocker_codes", "verifier_verdicts", "residuals"] {
+        if !v.get(arr).map(|x| x.is_array()).unwrap_or(false) {
+            return Err(format!("`{arr}` must be an array"));
+        }
+    }
+    Ok(())
+}
+
 // A candidate accumulates the distinct runs it covers; count == number of distinct runs.
 struct Cand {
     kind: &'static str,
@@ -97,6 +149,9 @@ fn main() {
                 .unwrap_or_else(|_| die(3, &format!("invalid trace JSON: {}", p.display())));
             if s(&v, "schema_version") != "trace/v0" {
                 die(3, &format!("not a trace/v0 artifact: {}", p.display()));
+            }
+            if let Err(why) = validate_trace(&v) {
+                die(3, &format!("invalid trace {}: {why}", p.display()));
             }
             runs.push(v);
         }

@@ -15,7 +15,7 @@
 		"schema_version": { "const": "bean.lessons.v0" },
 		"generated_at": {
 			"type": "integer",
-			"description": "Report generation time, milliseconds since the Unix epoch. Metadata only — excluded from determinism comparisons (the candidates are deterministic for a given corpus)."
+			"description": "Report generation time as an INTEGER, milliseconds since the Unix epoch (not ISO-8601). Metadata only — excluded from determinism comparisons (the candidates are deterministic for a given corpus)."
 		},
 		"source_run_count": {
 			"type": "integer",

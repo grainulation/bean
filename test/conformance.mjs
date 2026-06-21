@@ -654,11 +654,25 @@ lcheck("lessons: foreign schema_version -> exit 3", () => {
 	const { exit } = runLessons(dir);
 	assert.equal(exit, 3, `exit ${exit}`);
 });
-console.log(`${lpass}/5 bean-lessons checks pass`);
+lcheck(
+	"lessons: trace/v0 missing required fields -> exit 3 (fail closed)",
+	() => {
+		// correct schema_version but a partial/copied trace must NOT be silently summarized.
+		const dir = lessonsDir([
+			[
+				"partial.json",
+				JSON.stringify({ schema_version: "trace/v0", run_id: "x" }),
+			],
+		]);
+		const { exit } = runLessons(dir);
+		assert.equal(exit, 3, `exit ${exit}`);
+	},
+);
+console.log(`${lpass}/6 bean-lessons checks pass`);
 
 const total = pass + tpass + dpass + gpass + lpass;
 const totalN =
-	fixtures.length + SCENARIOS.length + 3 + GATE_CASES.length + 1 + 5;
+	fixtures.length + SCENARIOS.length + 3 + GATE_CASES.length + 1 + 6;
 console.log(
 	`\n${total}/${totalN} conformance + driver + gate + lessons checks pass`,
 );
