@@ -3,43 +3,90 @@
 How the convergence loop runs on Codex. bean is invoked explicitly as `/bean`
 (`agents/openai.yaml` sets `allow_implicit_invocation: false`), so it runs only when asked.
 
-## Runtime
+Codex has two supported modes. Name which one you are using when a `/bean` run starts.
 
-grainulator is a Claude Code plugin and is normally **not** available on Codex, so bean
-runs on the **minimal built-in ledger**: a `bean-stalk.md` claims table with hand-run
-compile checks. Same loop, lighter convergence guarantee (no automatic conflict detection,
-no numeric confidence). See [runtime.md](runtime.md). State that you're on the built-in
-ledger so the weaker stop-condition is visible.
+## Mode 1: installed runtime (enforced)
+
+This is the full bean 2.0 path. `./install.sh` builds the static runtime binaries into
+`bin/`, copies the skill into `~/.codex/skills/bean`, and registers `bean-hook` in
+`~/.codex/hooks.json`.
+
+In this mode:
+
+- `.bean/claims.json` is the durable claim ledger.
+- `bean-check --dir <project> --json` is the compiler/gate.
+- `bean-verify` is the only path that executes declared oracles.
+- `bean-hook` is inert until a project has `.bean/claims.json`; once active, it blocks a
+  Codex Stop event until `bean-check` returns `ready`, `converged-with-residuals`, or
+  `budget-exceeded`.
+- The runtime is local. bean itself adds no network calls or telemetry.
+
+Use this mode whenever the binaries are available. It is the only Codex mode with a hard
+stop-condition.
+
+## Mode 2: plugin-only skill (advisory)
+
+Installing only the Codex plugin gives Codex the `/bean` skill and these instructions. It
+does not by itself guarantee that the native binaries are present or that the Stop hook is
+registered. In that case, keep the same loop discipline, but say explicitly that the run is
+advisory until the runtime is installed.
+
+If `bean-check` cannot run and no installed runtime is available, fall back to the
+hand-checked `bean-stalk.md` table from [runtime.md](runtime.md). This is the weakest
+guarantee and must be stated in the output.
 
 ## Survey (step 1)
 
+- Identify the active control plane: installed runtime, plugin-only advisory, or
+  hand-checked fallback.
 - Check installed Codex plugins/skills; compose an existing one before hand-rolling.
-- Delegation is parallel `codex exec`; each lane gets a fresh context.
-- Read whatever sources the environment exposes (the repo, files, configured tools) before
+- Check whether subagent tooling is available in the current Codex surface. Do not assume
+  nested `codex exec` is allowed; managed sandboxes can block its network transport even
+  when local file tools work.
+- Read whatever sources the environment exposes (repo, files, configured tools) before
   recording a claim.
 
 ## Investigate / delegate (step 2)
 
-- Fan out the round's open front as separate `codex exec` invocations.
-- For file-mutating parallel work, give each lane an isolated working area (e.g. a git
-  worktree) so lanes don't collide; merge sequentially.
+- Prefer the runtime's existing agent/delegation tools when available.
+- Use `codex exec` lanes only when the environment permits nested Codex calls. If it is
+  blocked, record that as a residual or use the parent Codex session directly; do not
+  silently substitute a different model.
+- For file-mutating parallel work, give each lane an isolated working area (for example,
+  a git worktree) so lanes do not collide; merge sequentially.
 - Brief each lane per [delegate.md](delegate.md).
 
 ## Record / compile / revise (steps 3-5)
 
-- Maintain the `bean-stalk.md` table; tier each claim honestly (`stated`…`production`).
-- Run the compile checks by hand each round (conflicts, coverage gaps, single-source,
-  weak-evidence, new-this-round) — see [runtime.md](runtime.md).
-- Revise by superseding: mark the old row `superseded`, link the new one, record the
-  reason. See [belief-revision.md](belief-revision.md).
+Installed runtime:
+
+- Maintain `.bean/claims.json` and optional `.bean/run.json`.
+- Run `bean-check --dir <project> --json` each round.
+- Use `bean-verify` for declared strict/advisory oracle verdicts.
+- Revise by superseding: mark the old claim inactive/superseded, link the new one, and
+  record the reason.
+
+Fallback:
+
+- Maintain `bean-stalk.md`.
+- Hand-run the checks from [runtime.md](runtime.md): conflicts, coverage gaps,
+  single-source topics, weak evidence, and whether the round moved an open front.
+- State that this path has no automatic certificate or Stop-hook enforcement.
 
 ## Independent check
 
-The cross-model blindspot lane on Codex is a review by a _different model or a fresh
-context that did not form the belief_ — judge the raw artifact, report disagreements, treat
-the verdict as evidence. See [codex-blindspot.md](codex-blindspot.md).
+The blindspot lane on Codex should be a fresh context that did not form the belief, or a
+different model when one is authenticated and available. It judges the raw artifact,
+reports disagreements, and its verdict is recorded as evidence. See
+[codex-blindspot.md](codex-blindspot.md).
 
-## Notes
+If `claude -p` or another cross-family checker is unauthenticated, tag the cross-family
+check as blocked rather than replacing it silently.
 
-bean adds no tools, servers, hooks, network calls, dependencies, or telemetry on Codex.
-The `bean-stalk.md` is a plain working file, not infrastructure.
+## Codex portability checklist
+
+- `/bean` is explicit-only on Codex.
+- Full enforcement requires `bean-check` and `bean-hook`, not just the plugin manifest.
+- `~/.codex/hooks.json` must contain a Stop hook that runs the installed `bean-hook`.
+- A project without `.bean/claims.json` must not be affected by the hook.
+- A project with `.bean/claims.json` must fail closed if `bean-check` cannot run.

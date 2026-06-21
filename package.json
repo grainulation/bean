@@ -18,7 +18,7 @@
 		"LICENSE"
 	],
 	"scripts": {
-		"test": "node test/smoke.test.js && node test/bean-check.test.js",
+		"test": "node test/smoke.test.js && node test/codex-portability.test.js && node test/bean-check.test.js",
 		"typecheck": "tsc --noEmit",
 		"format": "npx prettier@3.3 --write .",
 		"format:check": "npx prettier@3.3 --check ."
