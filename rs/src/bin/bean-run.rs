@@ -433,6 +433,15 @@ fn main() {
         .iter()
         .filter(|k| !final_blockers.contains(*k))
         .count();
+    // the distinct blocker CODES (E_*) seen across the run — sorted+unique via BTreeSet — so the
+    // trace analyzer can rank which gate conditions fire most. Derived from the code:claim keys.
+    let blocker_codes: Vec<String> = blockers_seen
+        .iter()
+        .filter_map(|k| k.split_once(':').map(|(c, _)| c.to_string()))
+        .filter(|c| !c.is_empty())
+        .collect::<BTreeSet<String>>()
+        .into_iter()
+        .collect();
     let pivot_count = trace
         .iter()
         .filter(|t| t.get("pivot").and_then(|v| v.as_bool()).unwrap_or(false))
@@ -479,6 +488,7 @@ fn main() {
         "pivot_count": pivot_count,
         "blockers_opened": blockers_seen.len(),
         "blockers_closed": blockers_closed,
+        "blocker_codes": blocker_codes,
         "verifier_verdicts": verifier_verdicts,
         "residuals": residuals,
         "artifacts_changed": Vec::<String>::new(),

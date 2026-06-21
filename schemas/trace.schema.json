@@ -16,6 +16,7 @@
 		"pivot_count",
 		"blockers_opened",
 		"blockers_closed",
+		"blocker_codes",
 		"verifier_verdicts",
 		"residuals",
 		"artifacts_changed"
@@ -67,6 +68,12 @@
 			"type": "integer",
 			"minimum": 0,
 			"description": "Of those, the count not present in the final signal."
+		},
+		"blocker_codes": {
+			"type": "array",
+			"items": { "type": "string" },
+			"uniqueItems": true,
+			"description": "Sorted, de-duplicated blocker codes (E_*) seen across the run, so analyzers can rank which gate conditions fire most."
 		},
 		"verifier_verdicts": {
 			"type": "array",

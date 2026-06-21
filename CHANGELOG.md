@@ -5,7 +5,7 @@
 - **Trace artifact v0 (emit-only).** Every `bean-run` now writes a stable post-run record to
   `.bean/runs/<run_id>.json`: `schema_version`, `run_id`, `goal`, `started_at`/`ended_at`,
   `status`, `certificate`, `rounds`, `pivot_count`, `blockers_opened`/`blockers_closed`,
-  `verifier_verdicts`, `residuals`, `artifacts_changed`, `metadata`. One file per run (not a
+  `blocker_codes`, `verifier_verdicts`, `residuals`, `artifacts_changed`, `metadata`. One file per run (not a
   rolling file), so future tooling can analyze a corpus of runs without scraping transcripts.
   The top-level shape is **fixed** (`additionalProperties: false`); additive fields go under the
   `metadata` hatch. Emission **fails closed**: if the trace can't be written, `bean-run` exits
