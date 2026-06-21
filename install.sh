@@ -3,7 +3,7 @@
 # bean installer — builds the Rust runtime and wires it into Claude Code (and Codex).
 #
 # What you get after this:
-#   - the bean runtime binaries (bean-check, bean-verify, bean-run, bean-hook) built into ./bin
+#   - the bean runtime binaries (bean-check, bean-verify, bean-run, bean-hook, bean-lessons) built into ./bin
 #   - the /bean skill installed
 #   - a native Stop hook registered so bean COUPLES to execution: an agent can't finish a
 #     bean-tracked task (one with a .bean/ ledger) until the loop converges. Inert otherwise.
@@ -28,10 +28,10 @@ build_runtime() {
 	echo "  building the Rust runtime (release)..."
 	cargo build --release --quiet --manifest-path "$REPO_DIR/rs/Cargo.toml"
 	mkdir -p "$REPO_DIR/bin"
-	for b in bean-check bean-verify bean-run bean-hook; do
+	for b in bean-check bean-verify bean-run bean-hook bean-lessons; do
 		cp "$REPO_DIR/rs/target/release/$b" "$REPO_DIR/bin/$b"
 	done
-	echo "  binaries -> $REPO_DIR/bin (bean-check, bean-verify, bean-run, bean-hook)"
+	echo "  binaries -> $REPO_DIR/bin (bean-check, bean-verify, bean-run, bean-hook, bean-lessons)"
 }
 
 install_claude() {

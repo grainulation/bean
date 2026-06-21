@@ -51,7 +51,7 @@ jobs:
           dir="bean-${GITHUB_REF_NAME}-${{ matrix.target }}"
           out="rs/target/${{ matrix.target }}/release"
           mkdir -p "$dir"
-          cp "$out"/bean-check "$out"/bean-verify "$out"/bean-run "$out"/bean-hook "$dir"/
+          cp "$out"/bean-check "$out"/bean-verify "$out"/bean-run "$out"/bean-hook "$out"/bean-lessons "$dir"/
           cp README.md LICENSE "$dir"/ 2>/dev/null || true
           tar -czf "$dir.tar.gz" "$dir"
           shasum -a 256 "$dir.tar.gz" > "$dir.tar.gz.sha256"
