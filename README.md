@@ -6,6 +6,7 @@
   <a href="https://github.com/grainulation/bean/releases"><img src="https://img.shields.io/github/v/tag/grainulation/bean?label=version" alt="version"></a>
   <a href="https://github.com/grainulation/bean/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="license"></a>
   <a href="https://github.com/grainulation/bean/actions"><img src="https://github.com/grainulation/bean/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://deepwiki.com/grainulation/bean"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 </p>
 
 <h1 align="center">bean</h1>
